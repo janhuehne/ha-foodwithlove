@@ -341,9 +341,10 @@ class FwlApiClient:
             self._id_token = id_token
             self._id_token_expires_at = time.time() + expires_in - 60
 
-        # Some Identity Toolkit responses omit localId; refresh always returns user_id.
+        # Identity Toolkit often omits localId on custom-token sign-in;
+        # force a refresh — that response always includes user_id.
         if not uid:
-            await self.ensure_id_token()
+            await self.ensure_id_token(force_refresh=True)
             uid = self._uid or ""
 
         if not uid:
@@ -355,9 +356,14 @@ class FwlApiClient:
             "email": email.strip(),
         }
 
-    async def ensure_id_token(self) -> str:
+    async def ensure_id_token(self, *, force_refresh: bool = False) -> str:
         """Return a valid Firebase ID token, refreshing if needed."""
-        if self._id_token and time.time() < self._id_token_expires_at:
+        if (
+            not force_refresh
+            and self._id_token
+            and self._uid
+            and time.time() < self._id_token_expires_at
+        ):
             return self._id_token
         if not self._refresh_token:
             raise FwlAuthError("Not authenticated")
@@ -388,13 +394,18 @@ class FwlApiClient:
     async def list_weekplan(
         self, *, days_back: int = 7, days_forward: int = 21
     ) -> list[dict[str, Any]]:
-        """Return planned meals as ``{date, recipe_id, title, custom}``."""
+        """Return planned meals as ``{date, recipe_id, title, custom}``.
+
+        Firestore shape (confirmed against live account data):
+        ``users/{uid}/weekplan/{recipeId}`` with field
+        ``dates: { "yyyyMMdd": true, ... }``.
+        """
         await self.ensure_id_token()
         if not self._uid:
             raise FwlAuthError("Missing user id")
 
-        catalog = await self._list_weekplan_collection("weekplan")
-        custom = await self._list_weekplan_collection("weekplanCustom")
+        catalog = await self._list_weekplan_entries("weekplan")
+        custom = await self._list_weekplan_entries("weekplanCustom")
 
         start = date.today() - timedelta(days=days_back)
         end = date.today() + timedelta(days=days_forward)
@@ -402,35 +413,33 @@ class FwlApiClient:
         events: list[dict[str, Any]] = []
         recipe_ids: list[str] = []
 
-        for day_key, ids in catalog.items():
+        for recipe_id, day_key in catalog:
             day = _parse_fwl_day(day_key)
             if day is None or day < start or day > end:
                 continue
-            for rid in ids:
-                recipe_ids.append(rid)
-                events.append(
-                    {
-                        "date": day,
-                        "day_key": day_key,
-                        "recipe_id": rid,
-                        "custom": False,
-                    }
-                )
+            recipe_ids.append(recipe_id)
+            events.append(
+                {
+                    "date": day,
+                    "day_key": day_key,
+                    "recipe_id": recipe_id,
+                    "custom": False,
+                }
+            )
 
-        for day_key, ids in custom.items():
+        for recipe_id, day_key in custom:
             day = _parse_fwl_day(day_key)
             if day is None or day < start or day > end:
                 continue
-            for name in ids:
-                events.append(
-                    {
-                        "date": day,
-                        "day_key": day_key,
-                        "recipe_id": name,
-                        "title": name,
-                        "custom": True,
-                    }
-                )
+            events.append(
+                {
+                    "date": day,
+                    "day_key": day_key,
+                    "recipe_id": recipe_id,
+                    "title": recipe_id,
+                    "custom": True,
+                }
+            )
 
         titles = await self.resolve_recipe_titles(list(dict.fromkeys(recipe_ids)))
         for event in events:
@@ -440,34 +449,39 @@ class FwlApiClient:
         events.sort(key=lambda e: (e["date"], e.get("title") or ""))
         return events
 
-    async def _list_weekplan_collection(self, collection: str) -> dict[str, list[str]]:
-        url = f"{FIRESTORE_BASE}/users/{quote(self._uid)}/{collection}"
-        result = await self._request("GET", url, auth=True)
-        out: dict[str, list[str]] = {}
-        if not isinstance(result, dict):
-            return out
-        for doc in result.get("documents") or []:
-            name = doc.get("name") or ""
-            day_key = name.rsplit("/", 1)[-1]
-            fields = doc.get("fields") or {}
-            dates_field = fields.get("dates")
-            if dates_field:
-                decoded = _firestore_decode(dates_field)
-                if isinstance(decoded, dict):
-                    out[day_key] = [
-                        key for key, enabled in decoded.items() if enabled
-                    ]
+    async def _list_weekplan_entries(
+        self, collection: str
+    ) -> list[tuple[str, str]]:
+        """Return ``(recipe_id, day_key)`` pairs from a weekplan collection."""
+        entries: list[tuple[str, str]] = []
+        page_token: str | None = None
+        while True:
+            url = (
+                f"{FIRESTORE_BASE}/users/{quote(self._uid)}/{collection}"
+                f"?pageSize=100"
+            )
+            if page_token:
+                url += f"&pageToken={quote(page_token)}"
+            result = await self._request("GET", url, auth=True)
+            if not isinstance(result, dict):
+                break
+            for doc in result.get("documents") or []:
+                name = doc.get("name") or ""
+                recipe_id = name.rsplit("/", 1)[-1]
+                fields = doc.get("fields") or {}
+                dates_field = fields.get("dates")
+                if not dates_field:
                     continue
-            # weekplanCustom docs are often a flat map of name→bool
-            flat = {
-                key: _firestore_decode(value)
-                for key, value in fields.items()
-                if key != "dates"
-            }
-            enabled = [key for key, value in flat.items() if value is True]
-            if enabled:
-                out[day_key] = enabled
-        return out
+                decoded = _firestore_decode(dates_field)
+                if not isinstance(decoded, dict):
+                    continue
+                for day_key, enabled in decoded.items():
+                    if enabled:
+                        entries.append((recipe_id, day_key))
+            page_token = result.get("nextPageToken")
+            if not page_token:
+                break
+        return entries
 
     async def fetch_dashboard(self) -> dict[str, Any]:
         """Fetch greeting, today's recipe, and optional weekplan."""

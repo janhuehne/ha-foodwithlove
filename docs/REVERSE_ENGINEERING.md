@@ -70,8 +70,8 @@ Verified: `somethingbad` may be omitted (`null` in the app).
    `POST https://securetoken.googleapis.com/v1/token?key=…`  
    `grant_type=refresh_token&refresh_token=…`
 
-Weekplan document IDs use `yyyyMMdd` (e.g. `20261024`).  
-Field `dates` is a map of `recipeId → true`.
+Weekplan documents are keyed by **recipe ID**.  
+Field `dates` is a map of `yyyyMMdd → true` (which days that recipe is planned).
 
 ### Google / Apple
 
@@ -93,8 +93,8 @@ Requires `Authorization: Bearer <idToken>`:
 | Path | Purpose |
 |---|---|
 | `shoppingList/{listId}` | Shopping lists (`name`, `ingredients`, `portion`, `imageURL`) |
-| `weekplan/{yyyy-MM-dd}` | Planned recipe IDs for a day (+ `dates` map) |
-| `weekplanCustom/{date}` | Custom (non-catalog) weekplan entries |
+| `weekplan/{recipeId}` | Field `dates: { "yyyyMMdd": true, … }` (recipe → days) |
+| `weekplanCustom/{id}` | Same shape for custom / non-catalog entries |
 | `favoriteFolder/{folderId}` | Favorite folders |
 | user doc field `favorites` | Map of favorited recipe ids |
 | `note/{recipeId}` | Personal recipe notes |
