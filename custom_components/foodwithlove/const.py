@@ -13,7 +13,17 @@ CONF_REFRESH_TOKEN: Final = "refresh_token"
 CONF_UID: Final = "uid"
 CONF_LOGIN: Final = "login"
 
+# Options
+CONF_SCAN_INTERVAL: Final = "scan_interval"
+CONF_DAYS_BACK: Final = "days_back"
+CONF_DAYS_FORWARD: Final = "days_forward"
+
 DEFAULT_LANGUAGE: Final = "de"
+DEFAULT_SCAN_INTERVAL_MINUTES: Final = 60
+DEFAULT_SCAN_INTERVAL_AUTH_MINUTES: Final = 30
+DEFAULT_DAYS_BACK: Final = 7
+DEFAULT_DAYS_FORWARD: Final = 21
+
 DEFAULT_SCAN_INTERVAL: Final = timedelta(hours=1)
 DEFAULT_SCAN_INTERVAL_AUTH: Final = timedelta(minutes=30)
 
@@ -30,7 +40,7 @@ FIRESTORE_BASE: Final = (
 IDENTITY_URL: Final = "https://identitytoolkit.googleapis.com/v1"
 SECURE_TOKEN_URL: Final = "https://securetoken.googleapis.com/v1/token"
 
-USER_AGENT: Final = "HomeAssistant-foodwithlove/0.2.0"
+USER_AGENT: Final = "HomeAssistant-foodwithlove/0.3.0"
 
 SUPPORTED_LANGUAGES: Final = {
     "de": "Deutsch",
@@ -42,6 +52,8 @@ SUPPORTED_LANGUAGES: Final = {
 
 LOGIN_SKIP: Final = "skip"
 LOGIN_MAGIC_LINK: Final = "magic_link"
+
+SHOPPING_CUSTOM_DOC: Final = "custom"
 
 ATTR_RECIPE_ID: Final = "recipe_id"
 ATTR_PREPARATION_TIME: Final = "preparation_time"
@@ -57,3 +69,7 @@ ATTR_GREETING_DATE: Final = "date"
 ATTR_TRANSLATIONS: Final = "translations"
 ATTR_AUTHENTICATED: Final = "authenticated"
 ATTR_EMAIL: Final = "email"
+ATTR_NOTE: Final = "note"
+ATTR_FAVORITE_COUNT: Final = "favorite_count"
+ATTR_FAVORITE_FOLDERS: Final = "favorite_folders"
+ATTR_SHOPPING_LISTS: Final = "shopping_lists"

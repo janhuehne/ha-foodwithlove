@@ -12,27 +12,32 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    ATTR_AUTHENTICATED,
     ATTR_CATEGORIES,
     ATTR_CONTENT,
+    ATTR_EMAIL,
+    ATTR_FAVORITE_COUNT,
+    ATTR_FAVORITE_FOLDERS,
     ATTR_GREETING_DATE,
     ATTR_IMAGE_URL,
     ATTR_IS_FREE,
     ATTR_IS_PREMIUM,
+    ATTR_NOTE,
     ATTR_PREPARATION_TIME,
     ATTR_RECIPE_ID,
     ATTR_SERVING_TYPE,
     ATTR_SERVINGS,
     ATTR_THUMB_URL,
-    ATTR_AUTHENTICATED,
-    ATTR_EMAIL,
     ATTR_TRANSLATIONS,
     CONF_EMAIL,
+    CONF_REFRESH_TOKEN,
     DOMAIN,
 )
 from .coordinator import FwlDataUpdateCoordinator
 
 SENSOR_TODAY = "today"
 SENSOR_GREETING = "greeting"
+SENSOR_FAVORITES = "favorites"
 
 SENSORS: tuple[SensorEntityDescription, ...] = (
     SensorEntityDescription(
@@ -47,6 +52,12 @@ SENSORS: tuple[SensorEntityDescription, ...] = (
     ),
 )
 
+FAVORITES_SENSOR = SensorEntityDescription(
+    key=SENSOR_FAVORITES,
+    translation_key="favorites",
+    icon="mdi:heart",
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -55,9 +66,15 @@ async def async_setup_entry(
 ) -> None:
     """Set up food with love sensors."""
     coordinator = entry.runtime_data
-    async_add_entities(
-        FwlSensor(coordinator, entry.entry_id, description) for description in SENSORS
-    )
+    entities: list[FwlSensor] = [
+        FwlSensor(coordinator, entry.entry_id, description)
+        for description in SENSORS
+    ]
+    if entry.data.get(CONF_REFRESH_TOKEN):
+        entities.append(
+            FwlSensor(coordinator, entry.entry_id, FAVORITES_SENSOR)
+        )
+    async_add_entities(entities)
 
 
 class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
@@ -114,6 +131,27 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
                 ATTR_IS_PREMIUM: recipe.get("isPremium"),
                 ATTR_IS_FREE: recipe.get("isFree"),
                 ATTR_CONTENT: recipe.get("content"),
+                ATTR_NOTE: data.get("note"),
+                **auth_attrs,
+            }
+            return
+
+        if key == SENSOR_FAVORITES:
+            favorites = data.get("favorites") or {}
+            self._attr_native_value = favorites.get("count", 0)
+            self._attr_entity_picture = None
+            folders = favorites.get("folders") or []
+            self._attr_extra_state_attributes = {
+                ATTR_FAVORITE_COUNT: favorites.get("count", 0),
+                ATTR_FAVORITE_FOLDERS: [
+                    {
+                        "name": f.get("name"),
+                        "count": f.get("count"),
+                        "recipe_ids": f.get("recipe_ids"),
+                    }
+                    for f in folders
+                ],
+                "recipe_ids": favorites.get("recipe_ids") or [],
                 **auth_attrs,
             }
             return

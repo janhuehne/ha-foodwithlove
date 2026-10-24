@@ -4,13 +4,17 @@ Unofficial Home Assistant integration for **[food with love](https://www.foodwit
 
 > Not affiliated with fwl connect GmbH. Uses a reverse-engineered private API. For personal use only — respect FWL ToS and recipe copyright.
 
-## Features (v0.2)
+## Features (v0.3)
 
-| Entity | Login | Description |
+| Entity / feature | Login | Description |
 |---|---|---|
-| `sensor.*_recipe_of_the_day` | no | Today’s recipe (+ time, servings, image) |
-| `sensor.*_morning_greeting` | no | Daily greeting |
-| `calendar.*_week_plan` | Magic Link | Your week plan from the app |
+| `sensor.*` recipe of the day | no | Today’s recipe (+ time, servings, image, personal note when logged in) |
+| `sensor.*` morning greeting | no | Daily greeting |
+| `sensor.*` favorites | Magic Link | Favorite count + folders |
+| `calendar.*` week plan | Magic Link | Week plan (create/delete events supported) |
+| `todo.*` shopping list | Magic Link | Shopping ingredients; check off / delete writes back to FWL |
+| Options | — | Scan interval, calendar days back/forward |
+| Diagnostics / reauth | — | Redacted diagnostics; Magic Link reauth when token expires |
 
 ## Install
 
@@ -34,6 +38,10 @@ Copy `custom_components/foodwithlove` into your HA `config/custom_components/` f
 
 Already installed without login? Open the integration → **Reconfigure** to link your account.
 
+### Calendar create tip
+
+To add a catalog recipe, create a calendar event with `recipe_id=<id>` in the description. Without that, the event summary is stored as a custom weekplan entry.
+
 ## Lovelace example
 
 ```yaml
@@ -52,14 +60,5 @@ Entity IDs vary with language — check **Settings → Devices → food with lov
 python3 -m pip install -r requirements.txt
 python3 fwl_client.py
 ```
-
-## Roadmap
-
-- [x] Recipe of the day + greeting
-- [x] Magic Link auth
-- [x] Week plan → calendar
-- [ ] Shopping list → `todo`
-- [ ] Favorites sensor
-- [ ] Options flow (scan interval)
 
 Technical notes: [docs/REVERSE_ENGINEERING.md](docs/REVERSE_ENGINEERING.md)

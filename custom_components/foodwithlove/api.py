@@ -21,6 +21,7 @@ from .const import (
     FUNCTIONS_URL,
     IDENTITY_URL,
     SECURE_TOKEN_URL,
+    SHOPPING_CUSTOM_DOC,
     USER_AGENT,
 )
 
@@ -86,6 +87,29 @@ def _firestore_decode(value: dict[str, Any]) -> Any:
         values = value["arrayValue"].get("values") or []
         return [_firestore_decode(v) for v in values]
     return value
+
+
+def _firestore_encode(value: Any) -> dict[str, Any]:
+    """Encode a Python value as a Firestore REST field value."""
+    if value is None:
+        return {"nullValue": None}
+    if isinstance(value, bool):
+        return {"booleanValue": value}
+    if isinstance(value, int) and not isinstance(value, bool):
+        return {"integerValue": str(value)}
+    if isinstance(value, float):
+        return {"doubleValue": value}
+    if isinstance(value, str):
+        return {"stringValue": value}
+    if isinstance(value, dict):
+        return {
+            "mapValue": {
+                "fields": {k: _firestore_encode(v) for k, v in value.items()}
+            }
+        }
+    if isinstance(value, list):
+        return {"arrayValue": {"values": [_firestore_encode(v) for v in value]}}
+    return {"stringValue": str(value)}
 
 
 class FwlApiClient:
@@ -368,15 +392,32 @@ class FwlApiClient:
         if not self._refresh_token:
             raise FwlAuthError("Not authenticated")
 
-        result = await self._request(
-            "POST",
-            f"{SECURE_TOKEN_URL}?key={FIREBASE_API_KEY}",
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": self._refresh_token,
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
+        try:
+            result = await self._request(
+                "POST",
+                f"{SECURE_TOKEN_URL}?key={FIREBASE_API_KEY}",
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": self._refresh_token,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        except FwlApiError as err:
+            detail = str(err).lower()
+            if any(
+                token in detail
+                for token in (
+                    "invalid_grant",
+                    "token has been expired",
+                    "invalid refresh",
+                    "http 400",
+                    "http 401",
+                    "http 403",
+                )
+            ):
+                raise FwlAuthError("Token refresh failed") from err
+            raise
+
         if not isinstance(result, dict) or not result.get("id_token"):
             raise FwlAuthError("Token refresh failed")
 
@@ -389,21 +430,72 @@ class FwlApiClient:
         self._id_token_expires_at = time.time() + expires_in - 60
         return self._id_token
 
+    # --- Firestore helpers -------------------------------------------------
+
+    def _user_doc_url(self, *parts: str) -> str:
+        base = f"{FIRESTORE_BASE}/users/{quote(self._uid)}"
+        if not parts:
+            return base
+        path = "/".join(quote(p, safe="") for p in parts)
+        return f"{base}/{path}"
+
+    async def _firestore_list(self, collection: str) -> list[dict[str, Any]]:
+        docs: list[dict[str, Any]] = []
+        page_token: str | None = None
+        while True:
+            url = f"{FIRESTORE_BASE}/users/{quote(self._uid)}/{collection}?pageSize=100"
+            if page_token:
+                url += f"&pageToken={quote(page_token)}"
+            result = await self._request("GET", url, auth=True)
+            if not isinstance(result, dict):
+                break
+            docs.extend(result.get("documents") or [])
+            page_token = result.get("nextPageToken")
+            if not page_token:
+                break
+        return docs
+
+    async def _firestore_get(self, *parts: str) -> dict[str, Any] | None:
+        try:
+            result = await self._request(
+                "GET", self._user_doc_url(*parts), auth=True
+            )
+        except FwlApiError as err:
+            if "HTTP 404" in str(err):
+                return None
+            raise
+        return result if isinstance(result, dict) else None
+
+    async def _firestore_patch(
+        self,
+        *parts: str,
+        fields: dict[str, Any],
+        field_paths: list[str],
+    ) -> None:
+        params = "&".join(
+            f"updateMask.fieldPaths={quote(path, safe='')}" for path in field_paths
+        )
+        url = f"{self._user_doc_url(*parts)}?{params}"
+        await self._request(
+            "PATCH",
+            url,
+            json_body={"fields": {k: _firestore_encode(v) for k, v in fields.items()}},
+            auth=True,
+            headers={"Content-Type": "application/json"},
+        )
+
+    async def _require_auth(self) -> None:
+        await self.ensure_id_token()
+        if not self._uid:
+            raise FwlAuthError("Missing user id")
+
     # --- Firestore weekplan ------------------------------------------------
 
     async def list_weekplan(
         self, *, days_back: int = 7, days_forward: int = 21
     ) -> list[dict[str, Any]]:
-        """Return planned meals as ``{date, recipe_id, title, custom}``.
-
-        Firestore shape (confirmed against live account data):
-        ``users/{uid}/weekplan/{recipeId}`` with field
-        ``dates: { "yyyyMMdd": true, ... }``.
-        """
-        await self.ensure_id_token()
-        if not self._uid:
-            raise FwlAuthError("Missing user id")
-
+        """Return planned meals as ``{date, recipe_id, title, custom}``."""
+        await self._require_auth()
         catalog = await self._list_weekplan_entries("weekplan")
         custom = await self._list_weekplan_entries("weekplanCustom")
 
@@ -452,53 +544,215 @@ class FwlApiClient:
     async def _list_weekplan_entries(
         self, collection: str
     ) -> list[tuple[str, str]]:
-        """Return ``(recipe_id, day_key)`` pairs from a weekplan collection."""
         entries: list[tuple[str, str]] = []
-        page_token: str | None = None
-        while True:
-            url = (
-                f"{FIRESTORE_BASE}/users/{quote(self._uid)}/{collection}"
-                f"?pageSize=100"
-            )
-            if page_token:
-                url += f"&pageToken={quote(page_token)}"
-            result = await self._request("GET", url, auth=True)
-            if not isinstance(result, dict):
-                break
-            for doc in result.get("documents") or []:
-                name = doc.get("name") or ""
-                recipe_id = name.rsplit("/", 1)[-1]
-                fields = doc.get("fields") or {}
-                dates_field = fields.get("dates")
-                if not dates_field:
-                    continue
-                decoded = _firestore_decode(dates_field)
-                if not isinstance(decoded, dict):
-                    continue
-                for day_key, enabled in decoded.items():
-                    if enabled:
-                        entries.append((recipe_id, day_key))
-            page_token = result.get("nextPageToken")
-            if not page_token:
-                break
+        for doc in await self._firestore_list(collection):
+            name = doc.get("name") or ""
+            recipe_id = name.rsplit("/", 1)[-1]
+            fields = doc.get("fields") or {}
+            dates_field = fields.get("dates")
+            if not dates_field:
+                continue
+            decoded = _firestore_decode(dates_field)
+            if not isinstance(decoded, dict):
+                continue
+            for day_key, enabled in decoded.items():
+                if enabled:
+                    entries.append((recipe_id, day_key))
         return entries
 
-    async def fetch_dashboard(self) -> dict[str, Any]:
-        """Fetch greeting, today's recipe, and optional weekplan."""
+    async def set_weekplan_day(
+        self,
+        recipe_id: str,
+        day: date,
+        *,
+        enabled: bool = True,
+        custom: bool = False,
+    ) -> None:
+        """Add or remove a recipe on a calendar day."""
+        await self._require_auth()
+        day_key = day.strftime("%Y%m%d")
+        collection = "weekplanCustom" if custom else "weekplan"
+        # False → delete the day key (null) so the meal disappears cleanly.
+        value: bool | None = True if enabled else None
+        await self._firestore_patch(
+            collection,
+            recipe_id,
+            fields={"dates": {day_key: value}},
+            field_paths=[f"dates.`{day_key}`"],
+        )
+
+    # --- Shopping list -----------------------------------------------------
+
+    async def list_shopping_items(self) -> list[dict[str, Any]]:
+        """Flatten all shopping lists into todo-friendly items."""
+        await self._require_auth()
+        items: list[dict[str, Any]] = []
+        for doc in await self._firestore_list("shoppingList"):
+            recipe_id = (doc.get("name") or "").rsplit("/", 1)[-1]
+            fields = {
+                k: _firestore_decode(v) for k, v in (doc.get("fields") or {}).items()
+            }
+            list_name = fields.get("name") or recipe_id
+            ingredients = fields.get("ingredients") or {}
+            if not isinstance(ingredients, dict):
+                continue
+            for ingredient_id, raw in ingredients.items():
+                if not isinstance(raw, dict):
+                    continue
+                name = raw.get("name") or ingredient_id
+                quantity = raw.get("quantity") or ""
+                summary = f"{quantity} {name}".strip() if quantity else name
+                if recipe_id != SHOPPING_CUSTOM_DOC and list_name:
+                    summary = f"{summary} ({list_name})"
+                items.append(
+                    {
+                        "uid": f"{recipe_id}:{ingredient_id}",
+                        "recipe_id": recipe_id,
+                        "ingredient_id": ingredient_id,
+                        "list_name": list_name,
+                        "name": name,
+                        "quantity": quantity,
+                        "section": raw.get("section", 0),
+                        "index": raw.get("index", 0),
+                        "summary": summary,
+                        "done": bool(raw.get("done")),
+                        "raw": raw,
+                    }
+                )
+        items.sort(
+            key=lambda i: (
+                i["list_name"],
+                i.get("section", 0),
+                i.get("index", 0),
+                i["summary"],
+            )
+        )
+        return items
+
+    async def set_shopping_item_done(
+        self, recipe_id: str, ingredient_id: str, *, done: bool, raw: dict[str, Any]
+    ) -> None:
+        """Toggle an ingredient's done flag (merge write like the app)."""
+        await self._require_auth()
+        payload = dict(raw)
+        payload["done"] = done
+        await self._firestore_patch(
+            "shoppingList",
+            recipe_id,
+            fields={"ingredients": {ingredient_id: payload}},
+            field_paths=[f"ingredients.`{ingredient_id}`"],
+        )
+
+    async def delete_shopping_item(self, recipe_id: str, ingredient_id: str) -> None:
+        """Remove an ingredient from a shopping list document."""
+        await self._require_auth()
+        await self._firestore_patch(
+            "shoppingList",
+            recipe_id,
+            fields={"ingredients": {ingredient_id: None}},
+            field_paths=[f"ingredients.`{ingredient_id}`"],
+        )
+
+    # --- Favorites & notes -------------------------------------------------
+
+    async def get_favorites(self) -> dict[str, Any]:
+        """Return favorite recipe IDs and folders."""
+        await self._require_auth()
+        user_doc = await self._firestore_get()
+        favorites_map: dict[str, bool] = {}
+        if user_doc:
+            fields = user_doc.get("fields") or {}
+            if "favorites" in fields:
+                decoded = _firestore_decode(fields["favorites"])
+                if isinstance(decoded, dict):
+                    favorites_map = {
+                        k: bool(v) for k, v in decoded.items() if v is True
+                    }
+
+        folders: list[dict[str, Any]] = []
+        for doc in await self._firestore_list("favoriteFolder"):
+            folder_id = (doc.get("name") or "").rsplit("/", 1)[-1]
+            fields = {
+                k: _firestore_decode(v) for k, v in (doc.get("fields") or {}).items()
+            }
+            recipes = fields.get("recipes") or {}
+            active = [
+                rid
+                for rid, enabled in recipes.items()
+                if enabled
+            ] if isinstance(recipes, dict) else []
+            folders.append(
+                {
+                    "id": folder_id,
+                    "name": fields.get("name") or folder_id,
+                    "recipe_ids": active,
+                    "count": len(active),
+                }
+            )
+        folders.sort(key=lambda f: f["name"])
+        return {
+            "recipe_ids": sorted(favorites_map.keys()),
+            "count": len(favorites_map),
+            "folders": folders,
+        }
+
+    async def get_note(self, recipe_id: str) -> str | None:
+        await self._require_auth()
+        doc = await self._firestore_get("note", recipe_id)
+        if not doc:
+            return None
+        fields = doc.get("fields") or {}
+        if "note" not in fields:
+            return None
+        value = _firestore_decode(fields["note"])
+        return value if isinstance(value, str) else None
+
+    async def set_note(self, recipe_id: str, note: str) -> None:
+        await self._require_auth()
+        await self._firestore_patch(
+            "note",
+            recipe_id,
+            fields={"note": note},
+            field_paths=["note"],
+        )
+
+    # --- Dashboard aggregate -----------------------------------------------
+
+    async def fetch_dashboard(
+        self,
+        *,
+        days_back: int = 7,
+        days_forward: int = 21,
+    ) -> dict[str, Any]:
+        """Fetch greeting, today recipe, and optional account data."""
         greeting = await self.morning_greeting()
         recipe = await self.today_recipe()
         data: dict[str, Any] = {
             "greeting": greeting,
             "recipe": recipe,
             "weekplan": [],
+            "shopping_items": [],
+            "favorites": {"recipe_ids": [], "count": 0, "folders": []},
+            "note": None,
             "authenticated": self.authenticated,
         }
-        if self.authenticated:
-            try:
-                data["weekplan"] = await self.list_weekplan()
-            except FwlApiError as err:
-                _LOGGER.warning("Weekplan fetch failed: %s", err)
-                data["weekplan_error"] = str(err)
+        if not self.authenticated:
+            return data
+
+        try:
+            data["weekplan"] = await self.list_weekplan(
+                days_back=days_back, days_forward=days_forward
+            )
+            data["shopping_items"] = await self.list_shopping_items()
+            data["favorites"] = await self.get_favorites()
+            recipe_id = recipe.get("id") or recipe.get("_today_recipe_id")
+            if recipe_id:
+                data["note"] = await self.get_note(recipe_id)
+        except FwlAuthError:
+            raise
+        except FwlApiError as err:
+            _LOGGER.warning("Authenticated fetch failed: %s", err)
+            data["auth_error"] = str(err)
         return data
 
 

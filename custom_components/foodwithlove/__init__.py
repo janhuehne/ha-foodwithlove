@@ -17,7 +17,11 @@ from .const import (
 from .coordinator import FwlDataUpdateCoordinator
 
 PLATFORMS_PUBLIC = [Platform.SENSOR]
-PLATFORMS_AUTH = [Platform.SENSOR, Platform.CALENDAR]
+PLATFORMS_AUTH = [
+    Platform.SENSOR,
+    Platform.CALENDAR,
+    Platform.TODO,
+]
 
 
 def _platforms_for_entry(entry: ConfigEntry) -> list[Platform]:
@@ -51,10 +55,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     entry.runtime_data = coordinator
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(
         entry, _platforms_for_entry(entry)
     )
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options updates."""
+    coordinator: FwlDataUpdateCoordinator = entry.runtime_data
+    coordinator.apply_options()
+    await coordinator.async_request_refresh()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

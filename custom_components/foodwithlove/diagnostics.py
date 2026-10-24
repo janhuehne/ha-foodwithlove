@@ -1,0 +1,52 @@
+"""Diagnostics support for food with love."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+
+from .const import CONF_EMAIL, CONF_REFRESH_TOKEN, CONF_UID
+
+TO_REDACT = {CONF_REFRESH_TOKEN, CONF_EMAIL, CONF_UID, "note"}
+
+
+async def async_get_config_entry_diagnostics(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> dict[str, Any]:
+    """Return diagnostics for a config entry."""
+    coordinator = entry.runtime_data
+    data = coordinator.data or {}
+    recipe = data.get("recipe") or {}
+    favorites = data.get("favorites") or {}
+    shopping = data.get("shopping_items") or []
+    weekplan = data.get("weekplan") or []
+
+    return {
+        "entry": async_redact_data(
+            {
+                "title": entry.title,
+                "data": dict(entry.data),
+                "options": dict(entry.options),
+            },
+            TO_REDACT,
+        ),
+        "authenticated": bool(data.get("authenticated")),
+        "recipe": {
+            "id": recipe.get("id") or recipe.get("_today_recipe_id"),
+            "title": recipe.get("title"),
+            "preparation_time": recipe.get("preparationTime"),
+            "has_note": bool(data.get("note")),
+        },
+        "weekplan_count": len(weekplan),
+        "shopping_item_count": len(shopping),
+        "shopping_done_count": sum(1 for i in shopping if i.get("done")),
+        "favorites_count": favorites.get("count", 0),
+        "favorite_folders": [
+            {"name": f.get("name"), "count": f.get("count")}
+            for f in favorites.get("folders") or []
+        ],
+        "auth_error": data.get("auth_error"),
+    }

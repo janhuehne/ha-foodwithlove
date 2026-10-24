@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from homeassistant.components.calendar import CalendarEntity, CalendarEvent
+from homeassistant.components.calendar import (
+    CalendarEntity,
+    CalendarEntityFeature,
+    CalendarEvent,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
@@ -15,6 +20,8 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import FwlDataUpdateCoordinator
+
+_RECIPE_ID_RE = re.compile(r"recipe_id=([^\s;]+)")
 
 
 async def async_setup_entry(
@@ -37,6 +44,9 @@ class FwlWeekplanCalendar(
     _attr_has_entity_name = True
     _attr_translation_key = "weekplan"
     _attr_icon = "mdi:calendar-month"
+    _attr_supported_features = (
+        CalendarEntityFeature.CREATE_EVENT | CalendarEntityFeature.DELETE_EVENT
+    )
 
     def __init__(
         self, coordinator: FwlDataUpdateCoordinator, entry_id: str
@@ -76,6 +86,48 @@ class FwlWeekplanCalendar(
             if start <= day < end:
                 events.append(_to_event(item))
         return events
+
+    async def async_create_event(self, **kwargs: Any) -> None:
+        """Add a recipe to the week plan.
+
+        Put ``recipe_id=<id>`` in the description for a catalog recipe.
+        Otherwise the summary is stored as a custom weekplan entry.
+        """
+        start = kwargs["dtstart"]
+        day = start.date() if isinstance(start, datetime) else start
+        description = kwargs.get("description") or ""
+        match = _RECIPE_ID_RE.search(description)
+        if match:
+            await self.coordinator.client.set_weekplan_day(
+                match.group(1), day, enabled=True, custom=False
+            )
+        else:
+            recipe_id = (kwargs.get("summary") or "custom").strip() or "custom"
+            await self.coordinator.client.set_weekplan_day(
+                recipe_id, day, enabled=True, custom=True
+            )
+        await self.coordinator.async_request_refresh()
+
+    async def async_delete_event(
+        self,
+        uid: str,
+        recurrence_id: str | None = None,
+        recurrence_range: str | None = None,
+    ) -> None:
+        """Remove a meal from the week plan."""
+        if "_" not in uid:
+            return
+        day_key, recipe_id = uid.split("_", 1)
+        day = datetime.strptime(day_key, "%Y%m%d").date()
+        custom = False
+        for item in self.coordinator.data.get("weekplan") or []:
+            if item.get("day_key") == day_key and item.get("recipe_id") == recipe_id:
+                custom = bool(item.get("custom"))
+                break
+        await self.coordinator.client.set_weekplan_day(
+            recipe_id, day, enabled=False, custom=custom
+        )
+        await self.coordinator.async_request_refresh()
 
 
 def _to_event(item: dict[str, Any]) -> CalendarEvent:

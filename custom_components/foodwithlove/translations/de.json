@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "food with love",
-        "description": "Inoffizielle Integration. Öffentliche Daten ohne Login; Magic Link schaltet den Wochenplan-Kalender frei.",
+        "description": "Inoffizielle Integration. Öffentliche Daten ohne Login; Magic Link schaltet Wochenplan, Einkaufsliste und Favoriten frei.",
         "data": {
           "language": "Sprache",
           "login": "Konto"
@@ -22,6 +22,10 @@
         "data": {
           "code": "Code"
         }
+      },
+      "reauth_confirm": {
+        "title": "Erneut anmelden",
+        "description": "Deine food-with-love-Sitzung ist abgelaufen. Weiter, um einen neuen Magic Link an {email} zu senden."
       }
     },
     "error": {
@@ -31,7 +35,21 @@
     },
     "abort": {
       "already_configured": "food with love ist bereits eingerichtet.",
-      "reconfigure_successful": "Konto erfolgreich verknüpft."
+      "reconfigure_successful": "Konto erfolgreich verknüpft.",
+      "reauth_successful": "Erneute Anmeldung erfolgreich."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "food with love Optionen",
+        "description": "Aktualisierungsintervall und Zeitraum des Wochenplan-Kalenders.",
+        "data": {
+          "scan_interval": "Aktualisierungsintervall",
+          "days_back": "Kalendertage zurück",
+          "days_forward": "Kalendertage voraus"
+        }
+      }
     }
   },
   "entity": {
@@ -41,11 +59,19 @@
       },
       "greeting": {
         "name": "Morgengruß"
+      },
+      "favorites": {
+        "name": "Favoriten"
       }
     },
     "calendar": {
       "weekplan": {
         "name": "Wochenplan"
+      }
+    },
+    "todo": {
+      "shopping_list": {
+        "name": "Einkaufsliste"
       }
     }
   }

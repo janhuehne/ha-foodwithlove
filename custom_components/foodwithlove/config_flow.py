@@ -5,10 +5,19 @@ from __future__ import annotations
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, ConfigEntry
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_CODE
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -19,17 +28,23 @@ from homeassistant.helpers.selector import (
 
 from .api import FwlApiClient, FwlApiError, FwlAuthError
 from .const import (
+    CONF_DAYS_BACK,
+    CONF_DAYS_FORWARD,
     CONF_EMAIL,
     CONF_LANGUAGE,
     CONF_LOGIN,
     CONF_REFRESH_TOKEN,
+    CONF_SCAN_INTERVAL,
     CONF_UID,
+    DEFAULT_DAYS_BACK,
+    DEFAULT_DAYS_FORWARD,
     DEFAULT_LANGUAGE,
     DOMAIN,
     LOGIN_MAGIC_LINK,
     LOGIN_SKIP,
     SUPPORTED_LANGUAGES,
 )
+from .coordinator import default_scan_minutes
 
 
 class FwlConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -42,6 +57,12 @@ class FwlConfigFlow(ConfigFlow, domain=DOMAIN):
         self._email: str | None = None
         self._reference: str | None = None
         self._reconfigure_entry: ConfigEntry | None = None
+        self._reauth_entry: ConfigEntry | None = None
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        return FwlOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -104,6 +125,8 @@ class FwlConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Ask for the FWL account email and send a Magic Link code."""
         errors: dict[str, str] = {}
+        entry = self._reauth_entry or self._reconfigure_entry
+        default_email = self._email or (entry.data.get(CONF_EMAIL) if entry else None)
 
         if user_input is not None:
             email = user_input[CONF_EMAIL].strip()
@@ -120,15 +143,22 @@ class FwlConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._email = email
                 return await self.async_step_code()
 
+        schema: dict[Any, Any]
+        if default_email:
+            schema = {
+                vol.Required(CONF_EMAIL, default=default_email): TextSelector(
+                    TextSelectorConfig(type=TextSelectorType.EMAIL)
+                ),
+            }
+        else:
+            schema = {
+                vol.Required(CONF_EMAIL): TextSelector(
+                    TextSelectorConfig(type=TextSelectorType.EMAIL)
+                ),
+            }
         return self.async_show_form(
             step_id="email",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_EMAIL): TextSelector(
-                        TextSelectorConfig(type=TextSelectorType.EMAIL)
-                    ),
-                }
-            ),
+            data_schema=vol.Schema(schema),
             errors=errors,
         )
 
@@ -160,6 +190,11 @@ class FwlConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_REFRESH_TOKEN: tokens["refresh_token"],
                     CONF_UID: tokens["uid"],
                 }
+                if self._reauth_entry:
+                    return self.async_update_reload_and_abort(
+                        self._reauth_entry,
+                        data_updates=new_data,
+                    )
                 if self._reconfigure_entry:
                     return self.async_update_reload_and_abort(
                         self._reconfigure_entry,
@@ -195,3 +230,84 @@ class FwlConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_LANGUAGE, DEFAULT_LANGUAGE
         )
         return await self.async_step_email()
+
+    async def async_step_reauth(
+        self, entry_data: dict[str, Any]
+    ) -> ConfigFlowResult:
+        """Re-authenticate when the refresh token is invalid."""
+        self._reauth_entry = self._get_reauth_entry()
+        self._language = self._reauth_entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
+        self._email = self._reauth_entry.data.get(CONF_EMAIL)
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm reauth then send a new Magic Link."""
+        if user_input is not None:
+            return await self.async_step_email()
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            description_placeholders={"email": self._email or ""},
+        )
+
+
+class FwlOptionsFlow(OptionsFlow):
+    """Handle options for food with love."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        authenticated = bool(self.config_entry.data.get(CONF_REFRESH_TOKEN))
+        defaults = {
+            CONF_SCAN_INTERVAL: self.config_entry.options.get(
+                CONF_SCAN_INTERVAL, default_scan_minutes(authenticated)
+            ),
+            CONF_DAYS_BACK: self.config_entry.options.get(
+                CONF_DAYS_BACK, DEFAULT_DAYS_BACK
+            ),
+            CONF_DAYS_FORWARD: self.config_entry.options.get(
+                CONF_DAYS_FORWARD, DEFAULT_DAYS_FORWARD
+            ),
+        }
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_SCAN_INTERVAL, default=defaults[CONF_SCAN_INTERVAL]
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=5,
+                            max=1440,
+                            step=5,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="min",
+                        )
+                    ),
+                    vol.Required(
+                        CONF_DAYS_BACK, default=defaults[CONF_DAYS_BACK]
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=60,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Required(
+                        CONF_DAYS_FORWARD, default=defaults[CONF_DAYS_FORWARD]
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=1,
+                            max=90,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
+                }
+            ),
+        )

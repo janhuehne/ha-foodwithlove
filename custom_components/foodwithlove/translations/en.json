@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "food with love",
-        "description": "Unofficial integration. Public data works without login; Magic Link unlocks your week plan calendar.",
+        "description": "Unofficial integration. Public data works without login; Magic Link unlocks week plan, shopping list, and favorites.",
         "data": {
           "language": "Language",
           "login": "Account"
@@ -22,6 +22,10 @@
         "data": {
           "code": "Code"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate",
+        "description": "Your food with love session expired. Continue to send a new Magic Link to {email}."
       }
     },
     "error": {
@@ -31,7 +35,21 @@
     },
     "abort": {
       "already_configured": "food with love is already configured.",
-      "reconfigure_successful": "Account linked successfully."
+      "reconfigure_successful": "Account linked successfully.",
+      "reauth_successful": "Re-authentication successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "food with love options",
+        "description": "Polling interval and how far the week plan calendar looks.",
+        "data": {
+          "scan_interval": "Update interval",
+          "days_back": "Calendar days back",
+          "days_forward": "Calendar days forward"
+        }
+      }
     }
   },
   "entity": {
@@ -41,11 +59,19 @@
       },
       "greeting": {
         "name": "Morning greeting"
+      },
+      "favorites": {
+        "name": "Favorites"
       }
     },
     "calendar": {
       "weekplan": {
         "name": "Week plan"
+      }
+    },
+    "todo": {
+      "shopping_list": {
+        "name": "Shopping list"
       }
     }
   }

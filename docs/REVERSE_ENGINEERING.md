@@ -92,10 +92,11 @@ Requires `Authorization: Bearer <idToken>`:
 
 | Path | Purpose |
 |---|---|
-| `shoppingList/{listId}` | Shopping lists (`name`, `ingredients`, `portion`, `imageURL`) |
-| `weekplan/{recipeId}` | Field `dates: { "yyyyMMdd": true, … }` (recipe → days) |
+| `shoppingList/{listId}` | Shopping lists (`name`, `ingredients`, `portion`, `imageURL`); ingredient maps include `done` |
+| `weekplan/{recipeId}` | Field `dates: { "yyyyMMdd": true, … }` (recipe → days); PATCH merge to add/remove days |
 | `weekplanCustom/{id}` | Same shape for custom / non-catalog entries |
-| `favoriteFolder/{folderId}` | Favorite folders |
+| `users/{uid}` | Top-level `favorites: { recipeId: true }` map |
+| `favoriteFolder/{folderId}` | Favorite folders (`name`, `recipes`) |
 | user doc field `favorites` | Map of favorited recipe ids |
 | `note/{recipeId}` | Personal recipe notes |
 
