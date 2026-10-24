@@ -17,18 +17,58 @@
     return false;
   }
 
+  const VIEWER_PATH_RE = /^\/api\/foodwithlove\/recipe\/[A-Za-z0-9_%-]+$/;
+  const APP_HOST = "www.foodwithlove.de";
+  const IMAGE_HOST_RE =
+    /^(?:storage\.googleapis\.com|(?:[\w-]+\.)?googleapis\.com|www\.foodwithlove\.de|foodwithlove\.de|food-with-love-app\.web\.app|food-with-love-app\.firebaseapp\.com)$/i;
+
+  function normalizeViewerPath(viewerUrl) {
+    if (!viewerUrl) return null;
+    try {
+      const u = new URL(String(viewerUrl), window.location.origin);
+      if (u.origin !== window.location.origin) return null;
+      if (u.search || u.hash) return null;
+      if (!VIEWER_PATH_RE.test(u.pathname)) return null;
+      return u.pathname;
+    } catch (_err) {
+      return null;
+    }
+  }
+
+  function safeAppUrl(url) {
+    if (!url) return null;
+    try {
+      const u = new URL(String(url));
+      if (u.protocol !== "https:") return null;
+      if (u.hostname !== APP_HOST) return null;
+      if (u.pathname !== "/app" && u.pathname !== "/app/") return null;
+      return u.toString();
+    } catch (_err) {
+      return null;
+    }
+  }
+
   async function fetchRecipeHtml(hass, viewerUrl) {
-    if (!hass || !viewerUrl) return null;
-    const resp = await hass.fetchWithAuth(viewerUrl);
+    if (!hass) return null;
+    const path = normalizeViewerPath(viewerUrl);
+    if (!path) {
+      throw new Error("Invalid recipe viewer URL");
+    }
+    const resp = await hass.fetchWithAuth(path);
     if (!resp.ok) {
       throw new Error(`Recipe viewer HTTP ${resp.status}`);
+    }
+    const ctype = (resp.headers.get("content-type") || "").toLowerCase();
+    if (!ctype.includes("text/html")) {
+      throw new Error("Unexpected recipe content type");
     }
     return await resp.text();
   }
 
   async function openRecipe(hass, { appUrl, viewerUrl }) {
-    if (preferApp() && appUrl) {
-      window.location.href = appUrl;
+    const safeApp = safeAppUrl(appUrl);
+    if (preferApp() && safeApp) {
+      window.location.assign(safeApp);
       return;
     }
     if (viewerUrl) {
@@ -44,20 +84,21 @@
         return;
       }
     }
-    if (appUrl) window.location.href = appUrl;
+    if (safeApp) window.location.assign(safeApp);
   }
 
   function openViewerOverlay(html) {
     const existing = document.getElementById("fwl-recipe-overlay");
     if (existing) existing.remove();
 
-    // Blob tab: authenticated HTML without needing a cookie on /api/*
-    let blobUrl = null;
-    const revokeBlob = () => {
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl);
-        blobUrl = null;
-      }
+    // Content blob is only loaded inside sandbox=allow-scripts (no same-origin).
+    let contentBlobUrl = null;
+    let wrapperBlobUrl = null;
+    const revokeBlobs = () => {
+      if (wrapperBlobUrl) URL.revokeObjectURL(wrapperBlobUrl);
+      if (contentBlobUrl) URL.revokeObjectURL(contentBlobUrl);
+      wrapperBlobUrl = null;
+      contentBlobUrl = null;
     };
 
     const backdrop = document.createElement("div");
@@ -85,11 +126,18 @@
     tabBtn.textContent = "Neuer Tab";
     tabBtn.style.cssText = buttonStyle();
     tabBtn.addEventListener("click", () => {
-      revokeBlob();
-      blobUrl = URL.createObjectURL(
+      revokeBlobs();
+      contentBlobUrl = URL.createObjectURL(
         new Blob([html], { type: "text/html;charset=utf-8" })
       );
-      window.open(blobUrl, "_blank", "noopener");
+      // Wrapper stays script-free; recipe runs in an opaque-origin sandbox.
+      const wrapper = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rezept</title>
+<style>html,body,iframe{margin:0;border:0;width:100%;height:100%;background:#fff}</style>
+</head><body><iframe sandbox="allow-scripts" src="${contentBlobUrl}" title="Rezept"></iframe></body></html>`;
+      wrapperBlobUrl = URL.createObjectURL(
+        new Blob([wrapper], { type: "text/html;charset=utf-8" })
+      );
+      window.open(wrapperBlobUrl, "_blank", "noopener,noreferrer");
     });
 
     const closeBtn = document.createElement("button");
@@ -97,7 +145,7 @@
     closeBtn.textContent = "Schließen";
     closeBtn.style.cssText = buttonStyle(true);
     const close = () => {
-      revokeBlob();
+      revokeBlobs();
       backdrop.remove();
     };
     closeBtn.addEventListener("click", close);
@@ -110,7 +158,9 @@
     const iframe = document.createElement("iframe");
     iframe.title = "Rezept";
     iframe.style.cssText = "border:0;flex:1;width:100%;background:#fff;";
-    // srcdoc keeps HA auth out of the picture (no bare /api navigation).
+    // Scripts (portion scaler) allowed; opaque origin — no parent/HA access.
+    iframe.setAttribute("sandbox", "allow-scripts");
+    // srcdoc avoids navigating to /api/* without a bearer token.
     iframe.srcdoc = html;
 
     panel.append(bar, iframe);
@@ -136,9 +186,23 @@
   }
 
   function stripHtml(s) {
-    const d = document.createElement("div");
-    d.innerHTML = String(s ?? "");
-    return d.textContent || d.innerText || "";
+    // DOMParser documents are inert — unlike assigning to a detached element's
+    // innerHTML, which still runs <img onerror=…> / similar markup.
+    const doc = new DOMParser().parseFromString(String(s ?? ""), "text/html");
+    return doc.body.textContent || "";
+  }
+
+  /** Only allow https images from known FWL/CDN hosts. */
+  function safeHttpsUrl(url) {
+    try {
+      const u = new URL(String(url || "").trim());
+      if (u.protocol !== "https:") return "";
+      if (!IMAGE_HOST_RE.test(u.hostname)) return "";
+      if (u.username || u.password) return "";
+      return u.toString();
+    } catch (_err) {
+      return "";
+    }
   }
 
   function openHint() {
@@ -182,8 +246,9 @@
     const title = esc(meal.title || "");
     const prep = metaLine(meal);
     const size = imgSize || 72;
-    const img = meal.image_url
-      ? `<img src="${esc(meal.image_url)}" alt="" width="${size}" style="width:${size}px;max-width:${size}px;height:auto;border-radius:8px;flex:0 0 auto;" />`
+    const imgUrl = safeHttpsUrl(meal.image_url);
+    const img = imgUrl
+      ? `<img src="${esc(imgUrl)}" alt="" width="${size}" style="width:${size}px;max-width:${size}px;height:auto;border-radius:8px;flex:0 0 auto;" />`
       : "";
     const text = `<div class="fwl-text"><strong>${title}</strong>${prep}</div>`;
     const canOpen = meal.app_url || meal.viewer_url;
@@ -360,8 +425,9 @@
       const greeting = gEnt && this._hass.states[gEnt] ? this._hass.states[gEnt].state : "";
       const attrs = (st && st.attributes) || {};
       const title = st ? st.state : "";
-      const img =
-        attrs.thumb_url || attrs.entity_picture || attrs.image_url || "";
+      const img = safeHttpsUrl(
+        attrs.thumb_url || attrs.entity_picture || attrs.image_url || ""
+      );
       const metaBits = [];
       if (attrs.preparation_time != null && attrs.preparation_time !== "") {
         metaBits.push(`${attrs.preparation_time} min`);

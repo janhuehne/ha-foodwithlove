@@ -23,7 +23,7 @@ from .api import FwlApiError, FwlAuthError
 from .const import DOMAIN
 from .coordinator import FwlDataUpdateCoordinator
 
-_RECIPE_ID_RE = re.compile(r"recipe_id=([^\s;]+)")
+_RECIPE_ID_RE = re.compile(r"recipe_id=([A-Za-z0-9_-]{1,128})")
 
 
 async def async_setup_entry(

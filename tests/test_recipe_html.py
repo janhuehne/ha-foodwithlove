@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
+from _pkgutil import load
 
 # Minimal FWL-shaped recipe (do not depend on gitignored sample_*.json).
 _SAMPLE_RECIPE = {
@@ -42,13 +38,8 @@ _SAMPLE_RECIPE = {
 
 
 def _load_recipe_html():
-    path = ROOT / "custom_components/foodwithlove/recipe_html.py"
-    spec = importlib.util.spec_from_file_location("fwl_recipe_html", path)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["fwl_recipe_html"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    load("sanitize", "sanitize.py")
+    return load("recipe_html", "recipe_html.py")
 
 
 def test_recipe_viewer_path():
@@ -69,3 +60,17 @@ def test_render_recipe_html_includes_ingredients_and_steps():
     assert 'data-qty="5"' in html
     assert "const BASE = 12.0" in html or "const BASE = 12" in html
     assert "★ 4.5 (46)" in html
+    assert "onclick" not in html
+
+
+def test_render_strips_handler_attributes_from_rich_text():
+    mod = _load_recipe_html()
+    recipe = {
+        **_SAMPLE_RECIPE,
+        "content": '<span onclick="alert(1)">hi</span>',
+        "tip": '<div onmouseover="x()">tip</div>',
+    }
+    html = mod.render_recipe_html(recipe, language="de")
+    assert "onclick" not in html
+    assert "onmouseover" not in html
+    assert "<span>hi</span>" in html

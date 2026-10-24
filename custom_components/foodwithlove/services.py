@@ -14,6 +14,7 @@ from homeassistant.helpers import config_validation as cv
 from .api import FwlApiError, FwlAuthError
 from .const import DOMAIN
 from .coordinator import FwlDataUpdateCoordinator
+from .sanitize import is_valid_recipe_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -89,12 +90,14 @@ async def _async_set_weekplan_meal(
     custom = bool(data.get("custom"))
     if custom:
         key = (data.get("title") or "").strip()
-        if not key:
+        if not key or len(key) > 200:
             raise HomeAssistantError("title is required for custom weekplan entries")
+        if any(ch in key for ch in ("\x00", "\n", "\r", "`")):
+            raise HomeAssistantError("title contains invalid characters")
     else:
         key = (data.get("recipe_id") or "").strip()
-        if not key:
-            raise HomeAssistantError("recipe_id is required")
+        if not is_valid_recipe_id(key):
+            raise HomeAssistantError("recipe_id is invalid")
 
     try:
         await coordinator.client.set_weekplan_day(

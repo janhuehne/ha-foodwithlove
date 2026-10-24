@@ -2,22 +2,14 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from datetime import date
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+from _pkgutil import load
 
 
 def _load_week_overview():
-    path = ROOT / "custom_components/foodwithlove/week_overview.py"
-    spec = importlib.util.spec_from_file_location("fwl_week_overview", path)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["fwl_week_overview"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    load("sanitize", "sanitize.py")
+    return load("week_overview", "week_overview.py")
 
 
 def test_week_overview_matches_app_shape():

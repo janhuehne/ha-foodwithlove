@@ -13,7 +13,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    APP_RECIPE_URL,
     ATTR_APP_URL,
     ATTR_AUTHENTICATED,
     ATTR_CATEGORIES,
@@ -37,7 +36,12 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import FwlDataUpdateCoordinator
-from .recipe_html import recipe_viewer_path
+from .sanitize import (
+    app_recipe_url,
+    is_valid_recipe_id,
+    recipe_viewer_path,
+    safe_https_image_url,
+)
 from .week_overview import build_week_overview
 
 SENSOR_TODAY = "today"
@@ -128,9 +132,13 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
         if key == SENSOR_TODAY:
             recipe = data.get("recipe") or {}
             recipe_id = recipe.get("id")
+            if recipe_id and not is_valid_recipe_id(recipe_id):
+                recipe_id = None
             self._attr_native_value = recipe.get("title")
-            thumb = _first(recipe.get("thumbUrls"))
-            image = _first(recipe.get("fullUrls")) or thumb
+            thumb = safe_https_image_url(_first(recipe.get("thumbUrls")))
+            image = safe_https_image_url(
+                _first(recipe.get("fullUrls"))
+            ) or thumb
             self._attr_entity_picture = thumb
             self._attr_extra_state_attributes = {
                 ATTR_RECIPE_ID: recipe_id,
@@ -144,9 +152,7 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
                 ATTR_IS_FREE: recipe.get("isFree"),
                 ATTR_CONTENT: recipe.get("content"),
                 ATTR_NOTE: data.get("note"),
-                ATTR_APP_URL: (
-                    APP_RECIPE_URL.format(recipe_id=recipe_id) if recipe_id else None
-                ),
+                ATTR_APP_URL: app_recipe_url(recipe_id) if recipe_id else None,
                 ATTR_VIEWER_URL: (
                     recipe_viewer_path(recipe_id) if recipe_id else None
                 ),

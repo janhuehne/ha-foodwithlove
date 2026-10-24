@@ -31,13 +31,15 @@ Unofficial Home Assistant integration for **[food with love](https://www.foodwit
 
 ## Install (HACS)
 
-### Custom repository
+1. HACS → **Integrations** → search for **food with love** → Download  
+2. Restart Home Assistant  
+3. Settings → Devices & services → **Add integration** → **food with love**
+
+### Custom repository (if not yet in the default store)
 
 1. HACS → **Integrations** → ⋮ → **Custom repositories**
 2. URL: `https://github.com/janhuehne/ha-foodwithlove` — category **Integration**
-3. Download **food with love**
-4. Restart Home Assistant
-5. Settings → Devices & services → **Add integration** → **food with love**
+3. Download **food with love**, then restart and add the integration as above.
 
 ### Manual
 

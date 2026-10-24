@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
+from .sanitize import is_valid_recipe_id, recipe_viewer_path
+
 _WEEKDAYS_DE = (
     "Montag",
     "Dienstag",
@@ -50,7 +52,9 @@ def build_week_overview(
             "image_url": item.get("image_url"),
             "app_url": item.get("app_url"),
             "viewer_url": (
-                f"/api/foodwithlove/recipe/{recipe_id}" if recipe_id else None
+                recipe_viewer_path(recipe_id)
+                if recipe_id and is_valid_recipe_id(recipe_id)
+                else None
             ),
             "preparation_time": item.get("preparation_time"),
             "servings": item.get("servings"),

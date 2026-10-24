@@ -14,6 +14,7 @@ from .api import FwlApiError
 from .const import DOMAIN
 from .coordinator import FwlDataUpdateCoordinator
 from .recipe_html import render_recipe_html
+from .sanitize import is_valid_recipe_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ class FwlRecipeView(HomeAssistantView):
     requires_auth = True
 
     async def get(self, request: web.Request, recipe_id: str) -> web.Response:
+        if not is_valid_recipe_id(recipe_id):
+            return web.Response(status=400, text="Invalid recipe id")
+
         hass: HomeAssistant = request.app["hass"]
         entry = _primary_entry(hass)
         if entry is None:

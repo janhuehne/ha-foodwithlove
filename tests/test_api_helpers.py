@@ -2,30 +2,18 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from datetime import date, datetime, timezone
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
-PKG = "custom_components.foodwithlove"
-
-
-def _load(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+from _pkgutil import load
 
 
 @pytest.fixture(scope="module")
 def api():
-    _load(f"{PKG}.const", ROOT / "custom_components/foodwithlove/const.py")
-    return _load(f"{PKG}.api", ROOT / "custom_components/foodwithlove/api.py")
+    load("const", "const.py")
+    load("sanitize", "sanitize.py")
+    return load("api", "api.py")
 
 
 def test_split_field_path(api):
@@ -61,7 +49,7 @@ def test_utc_aes_key_shape(api):
 
 
 def test_app_recipe_url_const():
-    const = _load(f"{PKG}.const", ROOT / "custom_components/foodwithlove/const.py")
+    const = load("const", "const.py")
     assert (
         const.APP_RECIPE_URL.format(recipe_id="abc")
         == "https://www.foodwithlove.de/app/?recipe=abc"

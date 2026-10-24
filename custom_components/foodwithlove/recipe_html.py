@@ -4,20 +4,18 @@ from __future__ import annotations
 
 import html
 import json
-import re
 from typing import Any
 
-# Allow a small HTML subset already present in FWL recipe text.
-_ALLOWED_TAG = re.compile(
-    r"</?(?:br|strong|b|em|i|u|p|ul|ol|li|span|div)\b[^>]*>",
-    re.IGNORECASE,
+from .sanitize import (
+    recipe_viewer_path as _safe_viewer_path,
+    safe_https_image_url,
+    sanitize_rich_html,
 )
-_TAG = re.compile(r"<[^>]+>")
 
 
 def recipe_viewer_path(recipe_id: str) -> str:
     """Relative HA path for the recipe HTML viewer."""
-    return f"/api/foodwithlove/recipe/{recipe_id}"
+    return _safe_viewer_path(recipe_id)
 
 
 def render_recipe_html(recipe: dict[str, Any], *, language: str = "de") -> str:
@@ -49,15 +47,18 @@ def render_recipe_html(recipe: dict[str, Any], *, language: str = "de") -> str:
         meta_bits.append(f"★ {rating}{votes}")
     meta = " · ".join(meta_bits)
 
-    image = _first_url(recipe.get("fullUrls")) or _first_url(recipe.get("thumbUrls"))
+    image = safe_https_image_url(
+        _first_url(recipe.get("fullUrls")) or _first_url(recipe.get("thumbUrls"))
+    )
     image_html = (
-        f'<img class="hero" src="{html.escape(image, quote=True)}" alt="">'
+        f'<img class="hero" src="{html.escape(image, quote=True)}" alt="" '
+        f'referrerpolicy="no-referrer">'
         if image
         else ""
     )
 
-    intro = _rich(recipe.get("content"))
-    tip = _rich(recipe.get("tip") or recipe.get("potTip"))
+    intro = sanitize_rich_html(recipe.get("content"))
+    tip = sanitize_rich_html(recipe.get("tip") or recipe.get("potTip"))
     ingredients_html = _ingredients_block(recipe.get("ingredients") or [], de=de)
     steps = recipe.get("steps") or []
     pot_steps = recipe.get("potSteps") or []
@@ -120,6 +121,7 @@ def render_recipe_html(recipe: dict[str, Any], *, language: str = "de") -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none';">
   <title>{title}</title>
   <style>
     :root {{
@@ -390,7 +392,7 @@ def _steps_block(steps: list[Any], *, heading: str) -> str:
     for step in steps:
         if not isinstance(step, dict):
             continue
-        instruction = _rich(step.get("instruction"))
+        instruction = sanitize_rich_html(step.get("instruction"))
         if not instruction:
             continue
         parts.append(f"<li>{instruction}</li>")
@@ -407,23 +409,3 @@ def _first_url(urls: Any) -> str | None:
 
 def _text(value: Any) -> str:
     return html.escape(str(value or ""))
-
-
-def _rich(value: Any) -> str:
-    """Escape text but re-allow a few FWL formatting tags."""
-    if value is None:
-        return ""
-    raw = str(value)
-    if not raw.strip():
-        return ""
-    placeholders: list[str] = []
-
-    def _keep(match: re.Match[str]) -> str:
-        placeholders.append(match.group(0))
-        return f"\x00{len(placeholders) - 1}\x00"
-
-    kept = _ALLOWED_TAG.sub(_keep, raw)
-    escaped = html.escape(_TAG.sub("", kept))
-    for idx, tag in enumerate(placeholders):
-        escaped = escaped.replace(f"\x00{idx}\x00", tag)
-    return escaped

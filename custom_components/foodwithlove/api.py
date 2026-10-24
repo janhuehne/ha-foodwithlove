@@ -16,7 +16,6 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
 from .const import (
-    APP_RECIPE_URL,
     BASE_URL,
     FIREBASE_API_KEY,
     FIRESTORE_BASE,
@@ -25,6 +24,12 @@ from .const import (
     SECURE_TOKEN_URL,
     SHOPPING_CUSTOM_DOC,
     USER_AGENT,
+)
+from .sanitize import (
+    app_recipe_url,
+    is_valid_recipe_id,
+    recipe_viewer_path,
+    sanitize_error_detail,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -253,10 +258,17 @@ class FwlApiClient:
                 timeout=_TIMEOUT,
             ) as response:
                 body = await response.read()
-                if response.status >= 400:
-                    detail = body.decode("utf-8", errors="replace")[:500]
+                if len(body) > 5_000_000:
                     raise FwlApiError(
-                        f"HTTP {response.status} for {url}: {detail}",
+                        f"Response too large for {url}",
+                        status=response.status,
+                    )
+                if response.status >= 400:
+                    detail = sanitize_error_detail(
+                        body.decode("utf-8", errors="replace")
+                    )
+                    raise FwlApiError(
+                        f"HTTP {response.status}: {detail}",
                         status=response.status,
                     )
                 if not body:
@@ -697,7 +709,7 @@ class FwlApiClient:
             event["title"] = titles.get(rid, rid)
             info = details.get(rid) or {}
             event["image_url"] = info.get("image_url")
-            event["app_url"] = APP_RECIPE_URL.format(recipe_id=rid) if rid else None
+            event["app_url"] = app_recipe_url(rid) if rid else None
             if info.get("preparation_time") is not None:
                 event["preparation_time"] = info["preparation_time"]
             # Default yield from the recipe catalog — not stored on the weekplan.
@@ -721,7 +733,11 @@ class FwlApiClient:
             return {}
         index = await self.get_recipe_index_map()
         ratings = await self.get_ratings_map()
-        known = [rid for rid in recipe_ids if rid in index]
+        known = [
+            rid
+            for rid in recipe_ids
+            if rid in index and is_valid_recipe_id(rid)
+        ]
         out: dict[str, dict[str, Any]] = {}
         chunk_size = 20
         for i in range(0, len(known), chunk_size):
@@ -953,8 +969,10 @@ class FwlApiClient:
                 "recipe_id": rid,
                 "title": titles.get(rid) or rid,
                 "image_url": info.get("thumb_url") or info.get("image_url"),
-                "app_url": APP_RECIPE_URL.format(recipe_id=rid),
-                "viewer_url": f"/api/foodwithlove/recipe/{rid}",
+                "app_url": app_recipe_url(rid),
+                "viewer_url": (
+                    recipe_viewer_path(rid) if is_valid_recipe_id(rid) else None
+                ),
                 "preparation_time": info.get("preparation_time"),
                 "rating": info.get("rating"),
                 "rating_count": info.get("rating_count"),
