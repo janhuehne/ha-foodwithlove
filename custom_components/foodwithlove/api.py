@@ -643,6 +643,25 @@ class FwlApiClient:
             headers={"Content-Type": "application/json"},
         )
 
+    async def _firestore_create(
+        self, collection: str, fields: dict[str, Any]
+    ) -> str:
+        """Create a document under the user collection; return the new doc id."""
+        url = f"{FIRESTORE_BASE}/users/{quote(self._uid)}/{collection}"
+        encoded = {k: _firestore_encode(v) for k, v in fields.items()}
+        result = await self._firestore_request(
+            "POST",
+            url,
+            json_body={"fields": encoded},
+            headers={"Content-Type": "application/json"},
+        )
+        if not isinstance(result, dict) or not result.get("name"):
+            raise FwlApiError(f"Unexpected Firestore create response for {collection}")
+        return str(result["name"]).rsplit("/", 1)[-1]
+
+    async def _firestore_delete(self, *parts: str) -> None:
+        await self._firestore_request("DELETE", self._user_doc_url(*parts))
+
     async def _require_auth(self) -> None:
         await self.ensure_id_token()
         if not self._uid:
@@ -1015,6 +1034,95 @@ class FwlApiClient:
             return None
         value = _firestore_decode(fields["note"])
         return value if isinstance(value, str) else None
+
+    async def create_favorite_folder(self, name: str) -> str:
+        """Create an empty favorite folder; return its Firestore document id."""
+        await self._require_auth()
+        clean = name.strip()
+        if not clean or len(clean) > 80:
+            raise FwlApiError("Invalid folder name")
+        if any(ch in clean for ch in ("\x00", "\n", "\r", "`")):
+            raise FwlApiError("Invalid folder name")
+        return await self._firestore_create(
+            "favoriteFolder",
+            {"name": clean, "recipes": {}},
+        )
+
+    async def delete_favorite_folder(self, folder_id: str) -> None:
+        """Delete a favorite folder only when it contains no recipes."""
+        await self._require_auth()
+        if not is_valid_recipe_id(folder_id):
+            raise FwlApiError("Invalid folder id")
+        doc = await self._firestore_get("favoriteFolder", folder_id)
+        if doc is None:
+            raise FwlApiError("Folder not found", status=404)
+        fields = {
+            k: _firestore_decode(v) for k, v in (doc.get("fields") or {}).items()
+        }
+        recipes = fields.get("recipes") or {}
+        active = (
+            [rid for rid, enabled in recipes.items() if enabled]
+            if isinstance(recipes, dict)
+            else []
+        )
+        if active:
+            raise FwlApiError("Folder is not empty")
+        await self._firestore_delete("favoriteFolder", folder_id)
+
+    async def move_favorite(
+        self,
+        recipe_id: str,
+        *,
+        to_folder_id: str | None,
+    ) -> None:
+        """Move a favorited recipe into a folder, or to uncategorized (``None``).
+
+        Ensures the recipe stays in ``users/{uid}.favorites``. Removes it from
+        every folder map, then adds it to the target folder when given.
+        """
+        await self._require_auth()
+        if not is_valid_recipe_id(recipe_id):
+            raise FwlApiError("Invalid recipe id")
+        if to_folder_id is not None and not is_valid_recipe_id(to_folder_id):
+            raise FwlApiError("Invalid folder id")
+
+        # Keep in the global favorites map.
+        fav_path = f"favorites.`{recipe_id}`"
+        await self._firestore_patch(
+            leaf_updates={fav_path: True},
+            field_paths=[fav_path],
+        )
+
+        for doc in await self._firestore_list("favoriteFolder"):
+            folder_id = (doc.get("name") or "").rsplit("/", 1)[-1]
+            if not folder_id:
+                continue
+            fields = {
+                k: _firestore_decode(v) for k, v in (doc.get("fields") or {}).items()
+            }
+            recipes = fields.get("recipes") or {}
+            if not isinstance(recipes, dict) or recipe_id not in recipes:
+                continue
+            # Mask-only delete (omit from body) — safer than writing false/null.
+            path = f"recipes.`{recipe_id}`"
+            await self._firestore_patch(
+                "favoriteFolder",
+                folder_id,
+                fields={},
+                field_paths=[path],
+            )
+
+        if to_folder_id:
+            target = await self._firestore_get("favoriteFolder", to_folder_id)
+            if target is None:
+                raise FwlApiError("Folder not found", status=404)
+            path = f"recipes.`{recipe_id}`"
+            await self._firestore_patch(
+                "favoriteFolder",
+                to_folder_id,
+                leaf_updates={path: True},
+                field_paths=[path],
+            )
 
     # --- Dashboard aggregate -----------------------------------------------
 

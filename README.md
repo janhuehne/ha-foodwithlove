@@ -19,7 +19,8 @@ Unofficial Home Assistant integration for **[food with love](https://www.foodwit
 | Week plan calendar | Magic Link | Create / delete planned meals |
 | Remove from week plan | Magic Link | Service `foodwithlove.remove_weekplan_meal` + × on week card |
 | Add to week plan | Magic Link | Service `foodwithlove.add_weekplan_meal` + + on favorites |
-| Favorites | Magic Link | Collapsible folders with recipes (`custom:fwl-favorites-card`) |
+| Favorites | Magic Link | Collapsible folders (`custom:fwl-favorites-card`); move / create / delete empty |
+| Favorite folders | Magic Link | Services `create_favorite_folder`, `delete_favorite_folder`, `move_favorite` |
 | Shopping list todo | Magic Link | Check off / delete syncs back to FWL |
 | Options | — | Poll interval, calendar window |
 | Diagnostics / reauth | — | Redacted diagnostics; Magic Link when the token expires |

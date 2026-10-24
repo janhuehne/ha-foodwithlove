@@ -539,12 +539,154 @@
     });
   }
 
-  function favoriteRecipeRow(recipe) {
+  function promptText(title, placeholder) {
+    return new Promise((resolve) => {
+      const existing = document.getElementById("fwl-text-prompt");
+      if (existing) existing.remove();
+
+      const backdrop = document.createElement("div");
+      backdrop.id = "fwl-text-prompt";
+      backdrop.style.cssText =
+        "position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);" +
+        "display:flex;align-items:center;justify-content:center;padding:1rem;";
+
+      const panel = document.createElement("div");
+      panel.style.cssText =
+        "background:var(--card-background-color,#fff);color:var(--primary-text-color);" +
+        "border-radius:12px;padding:1rem 1.1rem;min-width:min(320px,100%);" +
+        "box-shadow:0 12px 40px rgba(0,0,0,.35);";
+
+      const heading = document.createElement("div");
+      heading.style.cssText = "font-weight:650;margin-bottom:.75rem;";
+      heading.textContent = title || "";
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = placeholder || "";
+      input.maxLength = 80;
+      input.style.cssText =
+        "width:100%;font:inherit;padding:.5rem;border-radius:8px;" +
+        "border:1px solid var(--divider-color,#ccc);margin-bottom:.85rem;" +
+        "background:transparent;color:inherit;box-sizing:border-box;";
+
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;justify-content:flex-end;gap:.5rem;";
+
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Abbrechen";
+      cancel.style.cssText = buttonStyle();
+      const ok = document.createElement("button");
+      ok.type = "button";
+      ok.textContent = "Anlegen";
+      ok.style.cssText = buttonStyle(true);
+
+      const close = (value) => {
+        backdrop.remove();
+        resolve(value);
+      };
+      cancel.addEventListener("click", () => close(null));
+      backdrop.addEventListener("click", (ev) => {
+        if (ev.target === backdrop) close(null);
+      });
+      ok.addEventListener("click", () => close((input.value || "").trim() || null));
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") close((input.value || "").trim() || null);
+      });
+
+      row.append(cancel, ok);
+      panel.append(heading, input, row);
+      backdrop.append(panel);
+      document.body.append(backdrop);
+      input.focus();
+    });
+  }
+
+  function pickFolder(title, folders, currentId) {
+    return new Promise((resolve) => {
+      const existing = document.getElementById("fwl-folder-picker");
+      if (existing) existing.remove();
+
+      const backdrop = document.createElement("div");
+      backdrop.id = "fwl-folder-picker";
+      backdrop.style.cssText =
+        "position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);" +
+        "display:flex;align-items:center;justify-content:center;padding:1rem;";
+
+      const panel = document.createElement("div");
+      panel.style.cssText =
+        "background:var(--card-background-color,#fff);color:var(--primary-text-color);" +
+        "border-radius:12px;padding:1rem 1.1rem;min-width:min(320px,100%);" +
+        "box-shadow:0 12px 40px rgba(0,0,0,.35);";
+
+      const heading = document.createElement("div");
+      heading.style.cssText = "font-weight:650;margin-bottom:.75rem;";
+      heading.textContent = title || "Ordner wählen";
+
+      const select = document.createElement("select");
+      select.style.cssText =
+        "width:100%;font:inherit;padding:.5rem;border-radius:8px;" +
+        "border:1px solid var(--divider-color,#ccc);margin-bottom:.85rem;" +
+        "background:transparent;color:inherit;box-sizing:border-box;";
+
+      const options = [
+        { id: "", name: "Ohne Ordner" },
+        ...folders.map((f) => ({ id: f.id, name: f.name || "Ordner" })),
+      ];
+      for (const opt of options) {
+        const el = document.createElement("option");
+        el.value = opt.id;
+        el.textContent = opt.name;
+        if (
+          (currentId || "") === (opt.id || "") ||
+          (currentId === "__uncategorized__" && !opt.id)
+        ) {
+          el.selected = true;
+        }
+        select.append(el);
+      }
+
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;justify-content:flex-end;gap:.5rem;";
+
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Abbrechen";
+      cancel.style.cssText = buttonStyle();
+      const ok = document.createElement("button");
+      ok.type = "button";
+      ok.textContent = "Verschieben";
+      ok.style.cssText = buttonStyle(true);
+
+      const close = (value) => {
+        backdrop.remove();
+        resolve(value);
+      };
+      cancel.addEventListener("click", () => close(undefined));
+      backdrop.addEventListener("click", (ev) => {
+        if (ev.target === backdrop) close(undefined);
+      });
+      ok.addEventListener("click", () => close(select.value));
+
+      row.append(cancel, ok);
+      panel.append(heading, select, row);
+      backdrop.append(panel);
+      document.body.append(backdrop);
+      select.focus();
+    });
+  }
+
+  function favoriteRecipeRow(recipe, folderId) {
     const rid = recipe.recipe_id || "";
-    const add = rid
-      ? `<button type="button" class="fwl-add" title="Zum Wochenplan" aria-label="Zum Wochenplan" data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}">+</button>`
-      : "";
-    return `<div class="fwl-fav-recipe">${mealMain(recipe, 56)}${openIconButton(recipe.app_url, recipe.viewer_url)}${add}</div>`;
+    if (!rid) {
+      return `<div class="fwl-fav-recipe">${mealMain(recipe, 56)}${openIconButton(recipe.app_url, recipe.viewer_url)}</div>`;
+    }
+    return `<div class="fwl-fav-recipe">${mealMain(recipe, 56)}${openIconButton(recipe.app_url, recipe.viewer_url)}
+      <button type="button" class="fwl-move" title="In Ordner verschieben" aria-label="In Ordner verschieben"
+        data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}" data-folder-id="${esc(folderId || "")}">↦</button>
+      <button type="button" class="fwl-add" title="Zum Wochenplan" aria-label="Zum Wochenplan"
+        data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}">+</button>
+    </div>`;
   }
 
   class FwlFavoritesCard extends HTMLElement {
@@ -585,14 +727,17 @@
           name: "Ohne Ordner",
           count: uncategorized.length,
           recipes: uncategorized,
+          deletable: false,
         });
       }
       for (const f of folders) {
+        const count = f.count != null ? f.count : (f.recipes || []).length;
         sections.push({
           id: f.id || f.name,
           name: f.name || "Ordner",
-          count: f.count || (f.recipes || []).length,
+          count,
           recipes: f.recipes || [],
+          deletable: count === 0 && !!f.id,
         });
       }
 
@@ -606,14 +751,23 @@
             const open = this._open.has(sec.id);
             const chev = open ? "▾" : "▸";
             const recipes = open
-              ? (sec.recipes || []).map(favoriteRecipeRow).join("")
+              ? (sec.recipes || [])
+                  .map((r) => favoriteRecipeRow(r, sec.id))
+                  .join("")
               : "";
+            const del =
+              sec.deletable
+                ? `<button type="button" class="fwl-del-folder" title="Leeren Ordner löschen" aria-label="Ordner löschen" data-folder-id="${esc(sec.id)}">×</button>`
+                : "";
             return `<div class="fwl-folder">
-              <button type="button" class="fwl-folder-head" data-id="${esc(sec.id)}">
-                <span class="chev">${chev}</span>
-                <span class="name">${esc(sec.name)}</span>
-                <span class="count">${esc(sec.count)}</span>
-              </button>
+              <div class="fwl-folder-row">
+                <button type="button" class="fwl-folder-head" data-id="${esc(sec.id)}">
+                  <span class="chev">${chev}</span>
+                  <span class="name">${esc(sec.name)}</span>
+                  <span class="count">${esc(sec.count)}</span>
+                </button>
+                ${del}
+              </div>
               ${open ? `<div class="fwl-folder-body">${recipes || "<em>Leer</em>"}</div>` : ""}
             </div>`;
           })
@@ -624,32 +778,55 @@
         <ha-card>
           <style>${sharedRowStyles()}
             .pad { padding: 12px 16px 16px; }
-            .summary { opacity: .75; margin-bottom: .65rem; font-size: .95rem; }
+            .summary-row {
+              display: flex; align-items: center; justify-content: space-between;
+              gap: .75rem; margin-bottom: .65rem;
+            }
+            .summary { opacity: .75; font-size: .95rem; }
+            button.fwl-new-folder {
+              appearance: none; border: 1px solid var(--divider-color, #ddd);
+              background: transparent; color: var(--primary-color, #03a9f4);
+              border-radius: 8px; padding: .25rem .65rem; font: inherit; cursor: pointer;
+              white-space: nowrap;
+            }
+            button.fwl-new-folder:hover { border-color: currentColor; }
+            button.fwl-new-folder:disabled { opacity: .4; cursor: wait; }
             .fwl-folder { border-top: 1px solid var(--divider-color, #3333); }
             .fwl-folder:first-of-type { border-top: 0; }
+            .fwl-folder-row { display: flex; align-items: center; gap: .35rem; }
             button.fwl-folder-head {
-              appearance: none; width: 100%; display: flex; align-items: center;
+              appearance: none; flex: 1; min-width: 0; display: flex; align-items: center;
               gap: .55rem; padding: .65rem 0; border: 0; background: transparent;
               color: inherit; font: inherit; cursor: pointer; text-align: left;
             }
             button.fwl-folder-head .chev { width: 1rem; opacity: .7; }
-            button.fwl-folder-head .name { flex: 1; font-weight: 650; }
+            button.fwl-folder-head .name { flex: 1; font-weight: 650; min-width: 0; }
             button.fwl-folder-head .count {
               opacity: .65; font-variant-numeric: tabular-nums;
             }
             .fwl-folder-body { padding: 0 0 .55rem .2rem; }
-            button.fwl-add {
+            button.fwl-add, button.fwl-move, button.fwl-del-folder {
               appearance: none; border: 1px solid var(--divider-color, #ddd);
               background: transparent; color: var(--primary-color, #03a9f4);
               width: 1.75rem; height: 1.75rem; border-radius: 999px;
-              font-size: 1.2rem; line-height: 1; cursor: pointer; flex: 0 0 auto;
+              font-size: 1.05rem; line-height: 1; cursor: pointer; flex: 0 0 auto;
+              display: inline-flex; align-items: center; justify-content: center;
             }
-            button.fwl-add:hover { border-color: currentColor; }
-            button.fwl-add:disabled { opacity: .4; cursor: wait; }
+            button.fwl-add { font-size: 1.2rem; }
+            button.fwl-del-folder { color: var(--error-color, #db4437); }
+            button.fwl-add:hover, button.fwl-move:hover, button.fwl-del-folder:hover {
+              border-color: currentColor;
+            }
+            button.fwl-add:disabled, button.fwl-move:disabled, button.fwl-del-folder:disabled {
+              opacity: .4; cursor: wait;
+            }
           </style>
           <div class="pad">
             ${this._config.title ? `<h2 style="margin:0 0 .35rem;font-size:1.1rem;">${esc(this._config.title)}</h2>` : ""}
-            <div class="summary">${esc(total)} Favoriten</div>
+            <div class="summary-row">
+              <div class="summary">${esc(total)} Favoriten</div>
+              <button type="button" class="fwl-new-folder">+ Ordner</button>
+            </div>
             ${body}
           </div>
         </ha-card>`;
@@ -658,6 +835,79 @@
         btn.addEventListener("click", () => this._toggle(btn.getAttribute("data-id")));
       });
       bindOpens(root, this._hass);
+
+      const newFolderBtn = root.querySelector("button.fwl-new-folder");
+      if (newFolderBtn) {
+        newFolderBtn.addEventListener("click", async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const name = await promptText("Neuen Ordner anlegen", "Ordnername");
+          if (!name) return;
+          newFolderBtn.disabled = true;
+          try {
+            await this._hass.callService("foodwithlove", "create_favorite_folder", {
+              name,
+            });
+          } catch (err) {
+            console.error("fwl create folder failed", err);
+            window.alert("Ordner konnte nicht angelegt werden.");
+          }
+          newFolderBtn.disabled = false;
+        });
+      }
+
+      root.querySelectorAll("button.fwl-del-folder").forEach((btn) => {
+        btn.addEventListener("click", async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const folderId = btn.getAttribute("data-folder-id") || "";
+          if (!folderId) return;
+          if (!window.confirm("Leeren Ordner wirklich löschen?")) return;
+          btn.disabled = true;
+          try {
+            await this._hass.callService("foodwithlove", "delete_favorite_folder", {
+              folder_id: folderId,
+            });
+          } catch (err) {
+            console.error("fwl delete folder failed", err);
+            window.alert("Ordner konnte nicht gelöscht werden (nur leere Ordner).");
+            btn.disabled = false;
+          }
+        });
+      });
+
+      root.querySelectorAll("button.fwl-move").forEach((btn) => {
+        btn.addEventListener("click", async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const recipeId = btn.getAttribute("data-recipe-id") || "";
+          const recipeTitle = btn.getAttribute("data-title") || "Rezept";
+          const currentFolder = btn.getAttribute("data-folder-id") || "";
+          if (!recipeId) return;
+          const chosen = await pickFolder(
+            `„${recipeTitle}“ verschieben`,
+            folders,
+            currentFolder
+          );
+          if (chosen === undefined) return;
+          const same =
+            chosen === currentFolder ||
+            (!chosen &&
+              (currentFolder === "" || currentFolder === "__uncategorized__"));
+          if (same) return;
+          btn.disabled = true;
+          try {
+            const data = { recipe_id: recipeId };
+            if (chosen) data.folder_id = chosen;
+            await this._hass.callService("foodwithlove", "move_favorite", data);
+          } catch (err) {
+            console.error("fwl move favorite failed", err);
+            window.alert("Konnte nicht verschieben.");
+            btn.disabled = false;
+          }
+        });
+      });
+
       root.querySelectorAll("button.fwl-add").forEach((btn) => {
         btn.addEventListener("click", async (ev) => {
           ev.preventDefault();
@@ -758,7 +1008,7 @@
     {
       type: "fwl-favorites-card",
       name: "food with love favorites",
-      description: "Collapsible favorite folders with add-to-weekplan",
+      description: "Favorite folders with move, create, and delete-when-empty",
     },
     {
       type: "fwl-food-card",

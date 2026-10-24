@@ -96,8 +96,8 @@ Requires `Authorization: Bearer <idToken>`:
 | `weekplan/{recipeId}` | Field `dates: { "yyyyMMdd": true, … }` (recipe → days). **Delete a day by omitting the masked field** — do not write `null` (app casts values to Boolean and crashes). |
 | `weekplanCustom/{yyyyMMdd}` | **Different shape:** one document per day; top-level keys are free-text meal titles mapped to `true`/`false` (`addCustom`/`deleteCustom`). |
 | `users/{uid}` | Top-level `favorites: { recipeId: true }` map |
-| `favoriteFolder/{folderId}` | Favorite folders (`name`, `recipes`) |
-| user doc field `favorites` | Map of favorited recipe ids |
+| `favoriteFolder/{folderId}` | Favorite folders (`name`, `recipes: { recipeId: true }`). Create via POST; delete only when `recipes` is empty. Move: strip recipe from all folder maps, then set on target (or leave uncategorized). |
+| user doc field `favorites` | Map of favorited recipe ids (kept when moving between folders) |
 | `note/{recipeId}` | Personal recipe notes |
 
 Joelle’s shared weekplan UID (hardcoded in app): `kc1je2gWhhgB4b71axEVWhHZ1YF2`.
