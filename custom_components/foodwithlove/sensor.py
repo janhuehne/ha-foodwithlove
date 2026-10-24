@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -10,6 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import (
     ATTR_AUTHENTICATED,
@@ -35,6 +37,26 @@ from .coordinator import FwlDataUpdateCoordinator
 SENSOR_TODAY = "today"
 SENSOR_GREETING = "greeting"
 SENSOR_FAVORITES = "favorites"
+SENSOR_WEEK_OVERVIEW = "week_overview"
+
+_WEEKDAYS_DE = (
+    "Montag",
+    "Dienstag",
+    "Mittwoch",
+    "Donnerstag",
+    "Freitag",
+    "Samstag",
+    "Sonntag",
+)
+_WEEKDAYS_EN = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
 
 SENSORS: tuple[SensorEntityDescription, ...] = (
     SensorEntityDescription(
@@ -55,6 +77,12 @@ FAVORITES_SENSOR = SensorEntityDescription(
     icon="mdi:heart",
 )
 
+WEEK_OVERVIEW_SENSOR = SensorEntityDescription(
+    key=SENSOR_WEEK_OVERVIEW,
+    translation_key="week_overview",
+    icon="mdi:calendar-week",
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -70,6 +98,9 @@ async def async_setup_entry(
     if entry.data.get(CONF_REFRESH_TOKEN):
         entities.append(
             FwlSensor(coordinator, entry.entry_id, FAVORITES_SENSOR)
+        )
+        entities.append(
+            FwlSensor(coordinator, entry.entry_id, WEEK_OVERVIEW_SENSOR)
         )
     async_add_entities(entities)
 
@@ -144,6 +175,31 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
             }
             return
 
+        if key == SENSOR_WEEK_OVERVIEW:
+            days = _build_week_overview(
+                data.get("weekplan") or [],
+                language=self.coordinator.client.language,
+            )
+            today_titles = next(
+                (d["meals"] for d in days if d.get("is_today")),
+                [],
+            )
+            if today_titles:
+                self._attr_native_value = ", ".join(today_titles)
+            else:
+                self._attr_native_value = (
+                    "Keine Rezepte"
+                    if self.coordinator.client.language == "de"
+                    else "No recipes"
+                )
+            self._attr_entity_picture = None
+            self._attr_extra_state_attributes = {
+                "days": days,
+                "meals_this_week": sum(len(d["meals"]) for d in days),
+                **auth_attrs,
+            }
+            return
+
         greeting = data.get("greeting") or {}
         body = greeting.get("body")
         translations = greeting.get("translations") or {}
@@ -156,6 +212,60 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
             ATTR_GREETING_DATE: greeting.get("date"),
             **auth_attrs,
         }
+
+
+def _build_week_overview(
+    weekplan: list[dict[str, Any]], *, language: str
+) -> list[dict[str, Any]]:
+    """Build Mon–Sun overview matching the FWL app Wochenüberblick."""
+    today = dt_util.now().date()
+    monday = today - timedelta(days=today.weekday())
+    by_day: dict[date, list[str]] = {}
+    for item in weekplan:
+        day = item.get("date")
+        if not isinstance(day, date):
+            continue
+        title = item.get("title") or item.get("recipe_id")
+        if not title:
+            continue
+        by_day.setdefault(day, []).append(title)
+
+    weekdays = _WEEKDAYS_DE if language == "de" else _WEEKDAYS_EN
+    days: list[dict[str, Any]] = []
+    for offset in range(7):
+        day = monday + timedelta(days=offset)
+        meals = by_day.get(day, [])
+        days.append(
+            {
+                "date": day.isoformat(),
+                "weekday": weekdays[offset],
+                "label": _day_label(day, weekdays[offset], language),
+                "meals": meals,
+                "is_today": day == today,
+                "empty": not meals,
+            }
+        )
+    return days
+
+
+def _day_label(day: date, weekday: str, language: str) -> str:
+    if language == "de":
+        months = (
+            "Januar",
+            "Februar",
+            "März",
+            "April",
+            "Mai",
+            "Juni",
+            "Juli",
+            "August",
+            "September",
+            "Oktober",
+            "November",
+            "Dezember",
+        )
+        return f"{weekday} {day.day}. {months[day.month - 1]}"
+    return f"{weekday} {day.strftime('%d %b')}"
 
 
 def _first(values: Any) -> str | None:

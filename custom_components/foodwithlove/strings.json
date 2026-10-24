@@ -63,6 +63,9 @@
       },
       "favorites": {
         "name": "Favorites"
+      },
+      "week_overview": {
+        "name": "Week overview"
       }
     },
     "calendar": {
