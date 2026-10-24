@@ -3,11 +3,40 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Minimal FWL-shaped recipe (do not depend on gitignored sample_*.json).
+_SAMPLE_RECIPE = {
+    "title": "Pflaumen-Haselnuss-Kuchen mit Baiser",
+    "preparationTime": 75,
+    "servingsNumber": 12,
+    "servingType": "Stücke",
+    "ingredients": [
+        {
+            "type": "Basis",
+            "ingredients": [
+                {"unit": "", "quantity": "5", "name": "große Pflaumen"},
+            ],
+        }
+    ],
+    "steps": [
+        {
+            "instruction": (
+                "Den Backofen auf <strong>175°C Ober-Unterhitze</strong> vorheizen."
+            ),
+            "stepIngredients": [],
+        }
+    ],
+    "potSteps": [
+        {
+            "instruction": "Teig im Topf verrühren.",
+            "stepIngredients": [],
+        }
+    ],
+}
 
 
 def _load_recipe_html():
@@ -27,8 +56,7 @@ def test_recipe_viewer_path():
 
 def test_render_recipe_html_includes_ingredients_and_steps():
     mod = _load_recipe_html()
-    sample = json.loads((ROOT / "sample_recipe.json").read_text(encoding="utf-8"))
-    html = mod.render_recipe_html(sample, language="de")
+    html = mod.render_recipe_html(_SAMPLE_RECIPE, language="de")
     assert "Pflaumen-Haselnuss-Kuchen" in html
     assert "Zutaten" in html
     assert "große Pflaumen" in html

@@ -3,6 +3,7 @@
   "name": "food with love",
   "codeowners": ["@janhuehne"],
   "config_flow": true,
+  "dependencies": ["http"],
   "documentation": "https://github.com/janhuehne/ha-foodwithlove",
   "integration_type": "service",
   "iot_class": "cloud_polling",
