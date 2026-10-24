@@ -35,6 +35,6 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install dependencies
-        run: pip install pytest pycryptodome
+        run: pip install pytest pycryptodome aiohttp
       - name: Run tests
         run: python -m pytest tests/ -q
