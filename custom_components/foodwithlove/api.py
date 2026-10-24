@@ -16,6 +16,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
 from .const import (
+    APP_RECIPE_URL,
     BASE_URL,
     FIREBASE_API_KEY,
     FIRESTORE_BASE,
@@ -657,12 +658,53 @@ class FwlApiClient:
             )
 
         titles = await self.resolve_recipe_titles(list(dict.fromkeys(recipe_ids)))
+        details = await self._recipe_details_map(list(dict.fromkeys(recipe_ids)))
         for event in events:
-            if not event.get("custom"):
-                event["title"] = titles.get(event["recipe_id"], event["recipe_id"])
+            rid = event.get("recipe_id")
+            if event.get("custom"):
+                event.setdefault("title", rid)
+                event["app_url"] = None
+                event["image_url"] = None
+                continue
+            event["title"] = titles.get(rid, rid)
+            info = details.get(rid) or {}
+            event["image_url"] = info.get("image_url")
+            event["app_url"] = APP_RECIPE_URL.format(recipe_id=rid) if rid else None
+            if info.get("preparation_time") is not None:
+                event["preparation_time"] = info["preparation_time"]
 
         events.sort(key=lambda e: (e["date"], e.get("title") or ""))
         return events
+
+    async def _recipe_details_map(
+        self, recipe_ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Fetch thumb/prep metadata for catalog recipe IDs (best-effort)."""
+        if not recipe_ids:
+            return {}
+        index = await self.get_recipe_index_map()
+        known = [rid for rid in recipe_ids if rid in index]
+        out: dict[str, dict[str, Any]] = {}
+        chunk_size = 20
+        for i in range(0, len(known), chunk_size):
+            chunk = known[i : i + chunk_size]
+            try:
+                recipes = await self.get_recipes(chunk)
+            except FwlApiError as err:
+                _LOGGER.warning("Failed to load recipe details %s: %s", chunk, err)
+                continue
+            for recipe in recipes:
+                rid = recipe.get("id")
+                if not rid:
+                    continue
+                thumb = _first_url(recipe.get("thumbUrls"))
+                image = _first_url(recipe.get("fullUrls")) or thumb
+                out[rid] = {
+                    "image_url": image,
+                    "thumb_url": thumb,
+                    "preparation_time": recipe.get("preparationTime"),
+                }
+        return out
 
     async def _list_catalog_weekplan(self) -> list[tuple[str, str]]:
         """Return ``(recipe_id, day_key)`` from ``weekplan/{recipeId}.dates``."""
@@ -931,3 +973,10 @@ def _parse_fwl_day(day_key: str) -> date | None:
         return datetime.strptime(day_key, "%Y%m%d").date()
     except ValueError:
         return None
+
+
+def _first_url(values: Any) -> str | None:
+    if isinstance(values, list) and values:
+        item = values[0]
+        return item if isinstance(item, str) else None
+    return None

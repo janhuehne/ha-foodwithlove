@@ -14,6 +14,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    APP_RECIPE_URL,
+    ATTR_APP_URL,
     ATTR_AUTHENTICATED,
     ATTR_CATEGORIES,
     ATTR_CONTENT,
@@ -140,12 +142,13 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
 
         if key == SENSOR_TODAY:
             recipe = data.get("recipe") or {}
+            recipe_id = recipe.get("id")
             self._attr_native_value = recipe.get("title")
             thumb = _first(recipe.get("thumbUrls"))
             image = _first(recipe.get("fullUrls")) or thumb
             self._attr_entity_picture = thumb
             self._attr_extra_state_attributes = {
-                ATTR_RECIPE_ID: recipe.get("id"),
+                ATTR_RECIPE_ID: recipe_id,
                 ATTR_PREPARATION_TIME: recipe.get("preparationTime"),
                 ATTR_SERVINGS: recipe.get("servingsNumber"),
                 ATTR_SERVING_TYPE: recipe.get("servingType"),
@@ -156,6 +159,9 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
                 ATTR_IS_FREE: recipe.get("isFree"),
                 ATTR_CONTENT: recipe.get("content"),
                 ATTR_NOTE: data.get("note"),
+                ATTR_APP_URL: (
+                    APP_RECIPE_URL.format(recipe_id=recipe_id) if recipe_id else None
+                ),
                 **auth_attrs,
             }
             return
@@ -180,19 +186,25 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
                 data.get("weekplan") or [],
                 language=self.coordinator.client.language,
             )
-            today_titles = next(
+            today_meals = next(
                 (d["meals"] for d in days if d.get("is_today")),
                 [],
             )
-            if today_titles:
-                self._attr_native_value = ", ".join(today_titles)
+            if today_meals:
+                self._attr_native_value = ", ".join(
+                    m["title"] for m in today_meals if m.get("title")
+                )
+                self._attr_entity_picture = next(
+                    (m.get("image_url") for m in today_meals if m.get("image_url")),
+                    None,
+                )
             else:
                 self._attr_native_value = (
                     "Keine Rezepte"
                     if self.coordinator.client.language == "de"
                     else "No recipes"
                 )
-            self._attr_entity_picture = None
+                self._attr_entity_picture = None
             self._attr_extra_state_attributes = {
                 "days": days,
                 "meals_this_week": sum(len(d["meals"]) for d in days),
@@ -220,7 +232,7 @@ def _build_week_overview(
     """Build Mon–Sun overview matching the FWL app Wochenüberblick."""
     today = dt_util.now().date()
     monday = today - timedelta(days=today.weekday())
-    by_day: dict[date, list[str]] = {}
+    by_day: dict[date, list[dict[str, Any]]] = {}
     for item in weekplan:
         day = item.get("date")
         if not isinstance(day, date):
@@ -228,7 +240,15 @@ def _build_week_overview(
         title = item.get("title") or item.get("recipe_id")
         if not title:
             continue
-        by_day.setdefault(day, []).append(title)
+        meal = {
+            "title": title,
+            "recipe_id": None if item.get("custom") else item.get("recipe_id"),
+            "custom": bool(item.get("custom")),
+            "image_url": item.get("image_url"),
+            "app_url": item.get("app_url"),
+            "preparation_time": item.get("preparation_time"),
+        }
+        by_day.setdefault(day, []).append(meal)
 
     weekdays = _WEEKDAYS_DE if language == "de" else _WEEKDAYS_EN
     days: list[dict[str, Any]] = []

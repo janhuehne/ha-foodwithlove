@@ -28,6 +28,7 @@ DEFAULT_SCAN_INTERVAL: Final = timedelta(hours=1)
 DEFAULT_SCAN_INTERVAL_AUTH: Final = timedelta(minutes=30)
 
 BASE_URL: Final = "https://food-with-love-app.web.app"
+APP_RECIPE_URL: Final = "https://www.foodwithlove.de/app/?recipe={recipe_id}"
 FUNCTIONS_URL: Final = (
     "https://europe-west3-food-with-love-app.cloudfunctions.net"
 )
@@ -40,7 +41,7 @@ FIRESTORE_BASE: Final = (
 IDENTITY_URL: Final = "https://identitytoolkit.googleapis.com/v1"
 SECURE_TOKEN_URL: Final = "https://securetoken.googleapis.com/v1/token"
 
-USER_AGENT: Final = "HomeAssistant-foodwithlove/0.3.2"
+USER_AGENT: Final = "HomeAssistant-foodwithlove/0.3.3"
 
 SUPPORTED_LANGUAGES: Final = {
     "de": "Deutsch",
@@ -69,5 +70,6 @@ ATTR_GREETING_DATE: Final = "date"
 ATTR_TRANSLATIONS: Final = "translations"
 ATTR_AUTHENTICATED: Final = "authenticated"
 ATTR_NOTE: Final = "note"
+ATTR_APP_URL: Final = "app_url"
 ATTR_FAVORITE_COUNT: Final = "favorite_count"
 ATTR_FAVORITE_FOLDERS: Final = "favorite_folders"
