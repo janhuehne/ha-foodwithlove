@@ -1,0 +1,26 @@
+# Reverse-engineering artifacts
+fwl.xapk
+fwl.apk
+xapk_extract/
+apk_unzipped/
+apk_src/
+jadx_out/
+*.html
+urls.txt
+sample_*.json
+today_recipe.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Misc
+.DS_Store
+.immocloud/
+poc/

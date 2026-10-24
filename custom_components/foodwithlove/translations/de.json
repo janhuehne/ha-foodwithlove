@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "food with love",
+        "description": "Inoffizielle Integration für die öffentliche food-with-love-API (Rezept des Tages und Morgengruß). Kein Login nötig.",
+        "data": {
+          "language": "Sprache"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Die food-with-love-API ist nicht erreichbar. Bitte später erneut versuchen."
+    },
+    "abort": {
+      "already_configured": "food with love ist bereits eingerichtet."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "today": {
+        "name": "Rezept des Tages"
+      },
+      "greeting": {
+        "name": "Morgengruß"
+      }
+    }
+  }
+}

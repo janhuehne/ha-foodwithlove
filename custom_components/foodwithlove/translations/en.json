@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "food with love",
+        "description": "Unofficial integration for the public food with love API (recipe of the day and morning greeting). No login required.",
+        "data": {
+          "language": "Language"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the food with love API. Try again later."
+    },
+    "abort": {
+      "already_configured": "food with love is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "today": {
+        "name": "Recipe of the day"
+      },
+      "greeting": {
+        "name": "Morning greeting"
+      }
+    }
+  }
+}
