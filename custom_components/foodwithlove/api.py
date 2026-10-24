@@ -332,7 +332,7 @@ class FwlApiClient:
             raise FwlAuthError("Firebase sign-in failed")
 
         refresh_token = sign_in["refreshToken"]
-        uid = sign_in.get("localId") or ""
+        uid = sign_in.get("localId") or sign_in.get("userId") or ""
         id_token = sign_in.get("idToken")
         expires_in = int(sign_in.get("expiresIn") or 3600)
 
@@ -341,8 +341,16 @@ class FwlApiClient:
             self._id_token = id_token
             self._id_token_expires_at = time.time() + expires_in - 60
 
+        # Some Identity Toolkit responses omit localId; refresh always returns user_id.
+        if not uid:
+            await self.ensure_id_token()
+            uid = self._uid or ""
+
+        if not uid:
+            raise FwlAuthError("Firebase sign-in did not return a user id")
+
         return {
-            "refresh_token": refresh_token,
+            "refresh_token": self._refresh_token or refresh_token,
             "uid": uid,
             "email": email.strip(),
         }

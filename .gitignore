@@ -24,3 +24,5 @@ venv/
 .DS_Store
 .immocloud/
 poc/
+.fwl_tokens.json
+.fwl_pending_login.json
