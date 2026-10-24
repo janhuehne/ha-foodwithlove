@@ -3,17 +3,35 @@
     "step": {
       "user": {
         "title": "food with love",
-        "description": "Inoffizielle Integration für die öffentliche food-with-love-API (Rezept des Tages und Morgengruß). Kein Login nötig.",
+        "description": "Inoffizielle Integration. Öffentliche Daten ohne Login; Magic Link schaltet den Wochenplan-Kalender frei.",
         "data": {
-          "language": "Sprache"
+          "language": "Sprache",
+          "login": "Konto"
+        }
+      },
+      "email": {
+        "title": "Magic Link",
+        "description": "E-Mail-Adresse deines food-with-love-Kontos. Du erhältst einen 6-stelligen Code.",
+        "data": {
+          "email": "E-Mail"
+        }
+      },
+      "code": {
+        "title": "Code eingeben",
+        "description": "Prüfe den Posteingang von {email} und gib den 6-stelligen Code ein.",
+        "data": {
+          "code": "Code"
         }
       }
     },
     "error": {
-      "cannot_connect": "Die food-with-love-API ist nicht erreichbar. Bitte später erneut versuchen."
+      "cannot_connect": "Die food-with-love-API ist nicht erreichbar. Bitte später erneut versuchen.",
+      "invalid_auth": "Magic-Link-Login für diese E-Mail konnte nicht gestartet werden.",
+      "invalid_code": "Der Code ist ungültig oder abgelaufen."
     },
     "abort": {
-      "already_configured": "food with love ist bereits eingerichtet."
+      "already_configured": "food with love ist bereits eingerichtet.",
+      "reconfigure_successful": "Konto erfolgreich verknüpft."
     }
   },
   "entity": {
@@ -23,6 +41,11 @@
       },
       "greeting": {
         "name": "Morgengruß"
+      }
+    },
+    "calendar": {
+      "weekplan": {
+        "name": "Wochenplan"
       }
     }
   }

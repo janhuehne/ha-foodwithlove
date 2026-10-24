@@ -57,11 +57,21 @@ Key rotates **daily (UTC)**. Device clock skew breaks decrypt (app logs `error_d
 
 ### Magic Link
 
-1. `POST …/v1RequestLogin` body `{ "email", "somethingbad"? }`  
-   → sends mail; returns reference
+Verified: `somethingbad` may be omitted (`null` in the app).
+
+1. `POST …/v1RequestLogin` body `{ "email": "…" }`  
+   → `{ "reference": "…" }` and sends a 6-digit code by email
 2. `POST …/v1VerifyLogin` body `{ "reference", "code", "email" }`  
    → `{ "token": "<firebase_custom_token>" }`
-3. `signInWithCustomToken` → ID token for `Authorization: Bearer …`
+3. Firebase Identity Toolkit  
+   `POST …/accounts:signInWithCustomToken?key=<web_api_key>`  
+   → `idToken`, `refreshToken`, `localId` (uid)
+4. Refresh  
+   `POST https://securetoken.googleapis.com/v1/token?key=…`  
+   `grant_type=refresh_token&refresh_token=…`
+
+Weekplan document IDs use `yyyyMMdd` (e.g. `20261024`).  
+Field `dates` is a map of `recipeId → true`.
 
 ### Google / Apple
 

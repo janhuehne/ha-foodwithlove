@@ -23,7 +23,10 @@ from .const import (
     ATTR_SERVING_TYPE,
     ATTR_SERVINGS,
     ATTR_THUMB_URL,
+    ATTR_AUTHENTICATED,
+    ATTR_EMAIL,
     ATTR_TRANSLATIONS,
+    CONF_EMAIL,
     DOMAIN,
 )
 from .coordinator import FwlDataUpdateCoordinator
@@ -89,6 +92,11 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
         data = self.coordinator.data or {}
         key = self.entity_description.key
 
+        auth_attrs = {
+            ATTR_AUTHENTICATED: bool(data.get("authenticated")),
+            ATTR_EMAIL: self.coordinator.entry.data.get(CONF_EMAIL),
+        }
+
         if key == SENSOR_TODAY:
             recipe = data.get("recipe") or {}
             self._attr_native_value = recipe.get("title")
@@ -106,6 +114,7 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
                 ATTR_IS_PREMIUM: recipe.get("isPremium"),
                 ATTR_IS_FREE: recipe.get("isFree"),
                 ATTR_CONTENT: recipe.get("content"),
+                **auth_attrs,
             }
             return
 
@@ -120,6 +129,7 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
         self._attr_extra_state_attributes = {
             ATTR_GREETING_DATE: greeting.get("date"),
             ATTR_TRANSLATIONS: translations,
+            **auth_attrs,
         }
 
 

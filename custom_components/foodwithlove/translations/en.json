@@ -3,17 +3,35 @@
     "step": {
       "user": {
         "title": "food with love",
-        "description": "Unofficial integration for the public food with love API (recipe of the day and morning greeting). No login required.",
+        "description": "Unofficial integration. Public data works without login; Magic Link unlocks your week plan calendar.",
         "data": {
-          "language": "Language"
+          "language": "Language",
+          "login": "Account"
+        }
+      },
+      "email": {
+        "title": "Magic Link",
+        "description": "Enter the email address of your food with love account. You will receive a 6-digit code.",
+        "data": {
+          "email": "Email"
+        }
+      },
+      "code": {
+        "title": "Enter code",
+        "description": "Check your inbox for {email} and enter the 6-digit code.",
+        "data": {
+          "code": "Code"
         }
       }
     },
     "error": {
-      "cannot_connect": "Could not reach the food with love API. Try again later."
+      "cannot_connect": "Could not reach the food with love API. Try again later.",
+      "invalid_auth": "Could not start Magic Link login for this email.",
+      "invalid_code": "The code is invalid or expired."
     },
     "abort": {
-      "already_configured": "food with love is already configured."
+      "already_configured": "food with love is already configured.",
+      "reconfigure_successful": "Account linked successfully."
     }
   },
   "entity": {
@@ -23,6 +41,11 @@
       },
       "greeting": {
         "name": "Morning greeting"
+      }
+    },
+    "calendar": {
+      "weekplan": {
+        "name": "Week plan"
       }
     }
   }
