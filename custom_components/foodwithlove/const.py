@@ -40,7 +40,7 @@ FIRESTORE_BASE: Final = (
 IDENTITY_URL: Final = "https://identitytoolkit.googleapis.com/v1"
 SECURE_TOKEN_URL: Final = "https://securetoken.googleapis.com/v1/token"
 
-USER_AGENT: Final = "HomeAssistant-foodwithlove/0.3.0"
+USER_AGENT: Final = "HomeAssistant-foodwithlove/0.3.1"
 
 SUPPORTED_LANGUAGES: Final = {
     "de": "Deutsch",
@@ -68,8 +68,6 @@ ATTR_CONTENT: Final = "content"
 ATTR_GREETING_DATE: Final = "date"
 ATTR_TRANSLATIONS: Final = "translations"
 ATTR_AUTHENTICATED: Final = "authenticated"
-ATTR_EMAIL: Final = "email"
 ATTR_NOTE: Final = "note"
 ATTR_FAVORITE_COUNT: Final = "favorite_count"
 ATTR_FAVORITE_FOLDERS: Final = "favorite_folders"
-ATTR_SHOPPING_LISTS: Final = "shopping_lists"

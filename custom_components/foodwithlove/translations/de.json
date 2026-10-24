@@ -36,7 +36,8 @@
     "abort": {
       "already_configured": "food with love ist bereits eingerichtet.",
       "reconfigure_successful": "Konto erfolgreich verknüpft.",
-      "reauth_successful": "Erneute Anmeldung erfolgreich."
+      "reauth_successful": "Erneute Anmeldung erfolgreich.",
+      "wrong_account": "Das Magic-Link-Konto gehört nicht zu diesem Integrationseintrag."
     }
   },
   "options": {

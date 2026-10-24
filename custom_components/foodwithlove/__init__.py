@@ -16,18 +16,9 @@ from .const import (
 )
 from .coordinator import FwlDataUpdateCoordinator
 
-PLATFORMS_PUBLIC = [Platform.SENSOR]
-PLATFORMS_AUTH = [
-    Platform.SENSOR,
-    Platform.CALENDAR,
-    Platform.TODO,
-]
-
-
-def _platforms_for_entry(entry: ConfigEntry) -> list[Platform]:
-    if entry.data.get(CONF_REFRESH_TOKEN):
-        return list(PLATFORMS_AUTH)
-    return list(PLATFORMS_PUBLIC)
+# Always forward all platforms so unload stays stable across public↔auth.
+# Calendar/todo skip entity creation when not authenticated.
+PLATFORMS = [Platform.SENSOR, Platform.CALENDAR, Platform.TODO]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -42,35 +33,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = FwlDataUpdateCoordinator(hass, client, entry)
     await coordinator.async_config_entry_first_refresh()
 
-    if client.refresh_token and client.refresh_token != entry.data.get(
-        CONF_REFRESH_TOKEN
-    ):
-        hass.config_entries.async_update_entry(
-            entry,
-            data={
-                **entry.data,
-                CONF_REFRESH_TOKEN: client.refresh_token,
-                CONF_UID: client.uid,
-            },
-        )
-
     entry.runtime_data = coordinator
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
-    await hass.config_entries.async_forward_entry_setups(
-        entry, _platforms_for_entry(entry)
-    )
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Handle options updates."""
-    coordinator: FwlDataUpdateCoordinator = entry.runtime_data
+    """Handle options updates (token rotation is ignored as a no-op refresh)."""
+    coordinator: FwlDataUpdateCoordinator | None = getattr(entry, "runtime_data", None)
+    if coordinator is None:
+        return
     coordinator.apply_options()
     await coordinator.async_request_refresh()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(
-        entry, _platforms_for_entry(entry)
-    )
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

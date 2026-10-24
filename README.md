@@ -4,7 +4,7 @@ Unofficial Home Assistant integration for **[food with love](https://www.foodwit
 
 > Not affiliated with fwl connect GmbH. Uses a reverse-engineered private API. For personal use only — respect FWL ToS and recipe copyright.
 
-## Features (v0.3)
+## Features (v0.3.1)
 
 | Entity / feature | Login | Description |
 |---|---|---|

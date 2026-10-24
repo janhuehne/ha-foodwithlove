@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import FwlApiClient, FwlApiError, FwlAuthError
 from .const import (
@@ -28,6 +29,8 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_ACCOUNT_KEYS = ("weekplan", "shopping_items", "favorites", "note")
 
 
 def _interval_for_entry(client: FwlApiClient, entry: ConfigEntry) -> timedelta:
@@ -67,15 +70,23 @@ class FwlDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         days_forward = int(
             self.entry.options.get(CONF_DAYS_FORWARD, DEFAULT_DAYS_FORWARD)
         )
+        previous = self.data or {}
         try:
             data = await self.client.fetch_dashboard(
                 days_back=days_back,
                 days_forward=days_forward,
+                today=dt_util.now().date(),
             )
         except FwlAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except FwlApiError as err:
             raise UpdateFailed(str(err)) from err
+
+        # Preserve last-known account data when a non-auth account fetch fails.
+        if data.get("account_stale") and previous:
+            for key in _ACCOUNT_KEYS:
+                if key in previous:
+                    data[key] = previous[key]
 
         if self.client.refresh_token and self.client.refresh_token != self.entry.data.get(
             CONF_REFRESH_TOKEN

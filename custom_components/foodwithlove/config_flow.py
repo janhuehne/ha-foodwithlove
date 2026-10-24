@@ -191,14 +191,26 @@ class FwlConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_UID: tokens["uid"],
                 }
                 if self._reauth_entry:
+                    await self.async_set_unique_id(tokens["uid"])
+                    self._abort_if_unique_id_mismatch(reason="wrong_account")
                     return self.async_update_reload_and_abort(
                         self._reauth_entry,
                         data_updates=new_data,
+                        title=f"food with love ({tokens['email']})",
                     )
                 if self._reconfigure_entry:
+                    existing_uid = self._reconfigure_entry.unique_id
+                    await self.async_set_unique_id(tokens["uid"])
+                    if existing_uid in (None, DOMAIN):
+                        # Public-only → account: claim the UID if free.
+                        self._abort_if_unique_id_configured()
+                    else:
+                        self._abort_if_unique_id_mismatch(reason="wrong_account")
                     return self.async_update_reload_and_abort(
                         self._reconfigure_entry,
                         data_updates=new_data,
+                        title=f"food with love ({tokens['email']})",
+                        unique_id=tokens["uid"],
                     )
 
                 await self.async_set_unique_id(tokens["uid"] or DOMAIN)

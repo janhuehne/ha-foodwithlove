@@ -10,11 +10,12 @@ from homeassistant.components.todo import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import FwlApiError
+from .api import FwlApiError, FwlAuthError
 from .const import DOMAIN
 from .coordinator import FwlDataUpdateCoordinator
 
@@ -81,29 +82,47 @@ class FwlShoppingTodo(
         ]
 
     async def async_update_todo_item(self, item: TodoItem) -> None:
-        """Toggle done / leave summary as-is (FWL has no rename API here)."""
+        """Toggle done; reject unsupported renames."""
         if not item.uid:
             return
         stored = self._items_by_uid.get(item.uid)
         if not stored:
-            raise FwlApiError(f"Unknown shopping item {item.uid}")
+            raise HomeAssistantError(f"Unknown shopping item {item.uid}")
+        if item.summary is not None and item.summary != stored["summary"]:
+            raise HomeAssistantError("Renaming shopping items is not supported")
         done = item.status == TodoItemStatus.COMPLETED
-        await self.coordinator.client.set_shopping_item_done(
-            stored["recipe_id"],
-            stored["ingredient_id"],
-            done=done,
-            raw=stored.get("raw") or {},
-        )
+        try:
+            await self.coordinator.client.set_shopping_item_done(
+                stored["recipe_id"],
+                stored["ingredient_id"],
+                done=done,
+            )
+        except FwlAuthError as err:
+            self.coordinator.entry.async_start_reauth(self.hass)
+            raise HomeAssistantError(
+                "food with love authentication expired"
+            ) from err
+        except FwlApiError as err:
+            raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()
 
     async def async_delete_todo_items(self, uids: list[str]) -> None:
         """Remove ingredients from Firestore shopping lists."""
-        for uid in uids:
-            stored = self._items_by_uid.get(uid)
-            if not stored:
-                continue
-            await self.coordinator.client.delete_shopping_item(
-                stored["recipe_id"],
-                stored["ingredient_id"],
-            )
-        await self.coordinator.async_request_refresh()
+        try:
+            for uid in uids:
+                stored = self._items_by_uid.get(uid)
+                if not stored:
+                    continue
+                await self.coordinator.client.delete_shopping_item(
+                    stored["recipe_id"],
+                    stored["ingredient_id"],
+                )
+        except FwlAuthError as err:
+            self.coordinator.entry.async_start_reauth(self.hass)
+            raise HomeAssistantError(
+                "food with love authentication expired"
+            ) from err
+        except FwlApiError as err:
+            raise HomeAssistantError(str(err)) from err
+        finally:
+            await self.coordinator.async_request_refresh()

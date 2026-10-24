@@ -36,7 +36,8 @@
     "abort": {
       "already_configured": "food with love is already configured.",
       "reconfigure_successful": "Account linked successfully.",
-      "reauth_successful": "Re-authentication successful."
+      "reauth_successful": "Re-authentication successful.",
+      "wrong_account": "The Magic Link account does not match this integration entry."
     }
   },
   "options": {

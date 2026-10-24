@@ -92,9 +92,9 @@ Requires `Authorization: Bearer <idToken>`:
 
 | Path | Purpose |
 |---|---|
-| `shoppingList/{listId}` | Shopping lists (`name`, `ingredients`, `portion`, `imageURL`); ingredient maps include `done` |
-| `weekplan/{recipeId}` | Field `dates: { "yyyyMMdd": true, … }` (recipe → days); PATCH merge to add/remove days |
-| `weekplanCustom/{id}` | Same shape for custom / non-catalog entries |
+| `shoppingList/{listId}` | Shopping lists (`name`, `ingredients`, `portion`, `imageURL`); ingredient maps include `done`. App delete writes `null` for an ingredient key. |
+| `weekplan/{recipeId}` | Field `dates: { "yyyyMMdd": true, … }` (recipe → days). **Delete a day by omitting the masked field** — do not write `null` (app casts values to Boolean and crashes). |
+| `weekplanCustom/{yyyyMMdd}` | **Different shape:** one document per day; top-level keys are free-text meal titles mapped to `true`/`false` (`addCustom`/`deleteCustom`). |
 | `users/{uid}` | Top-level `favorites: { recipeId: true }` map |
 | `favoriteFolder/{folderId}` | Favorite folders (`name`, `recipes`) |
 | user doc field `favorites` | Map of favorited recipe ids |

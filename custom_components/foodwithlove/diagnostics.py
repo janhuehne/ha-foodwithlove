@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -11,6 +12,18 @@ from homeassistant.core import HomeAssistant
 from .const import CONF_EMAIL, CONF_REFRESH_TOKEN, CONF_UID
 
 TO_REDACT = {CONF_REFRESH_TOKEN, CONF_EMAIL, CONF_UID, "note"}
+
+
+def _sanitize_title(title: str) -> str:
+    return re.sub(r"\([^)]*@[^)]*\)", "(<email>)", title)
+
+
+def _sanitize_error(message: str | None) -> str | None:
+    if not message:
+        return message
+    message = re.sub(r"/users/[^/\s]+", "/users/<uid>", message)
+    message = re.sub(r"Bearer\s+\S+", "Bearer <redacted>", message)
+    return message[:200]
 
 
 async def async_get_config_entry_diagnostics(
@@ -27,7 +40,7 @@ async def async_get_config_entry_diagnostics(
     return {
         "entry": async_redact_data(
             {
-                "title": entry.title,
+                "title": _sanitize_title(entry.title),
                 "data": dict(entry.data),
                 "options": dict(entry.options),
             },
@@ -35,7 +48,7 @@ async def async_get_config_entry_diagnostics(
         ),
         "authenticated": bool(data.get("authenticated")),
         "recipe": {
-            "id": recipe.get("id") or recipe.get("_today_recipe_id"),
+            "id": recipe.get("id"),
             "title": recipe.get("title"),
             "preparation_time": recipe.get("preparationTime"),
             "has_note": bool(data.get("note")),
@@ -48,5 +61,6 @@ async def async_get_config_entry_diagnostics(
             {"name": f.get("name"), "count": f.get("count")}
             for f in favorites.get("folders") or []
         ],
-        "auth_error": data.get("auth_error"),
+        "account_error": _sanitize_error(data.get("account_error")),
+        "account_stale": bool(data.get("account_stale")),
     }

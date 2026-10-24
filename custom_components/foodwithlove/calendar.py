@@ -13,11 +13,13 @@ from homeassistant.components.calendar import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
+from .api import FwlApiError, FwlAuthError
 from .const import DOMAIN
 from .coordinator import FwlDataUpdateCoordinator
 
@@ -91,21 +93,27 @@ class FwlWeekplanCalendar(
         """Add a recipe to the week plan.
 
         Put ``recipe_id=<id>`` in the description for a catalog recipe.
-        Otherwise the summary is stored as a custom weekplan entry.
+        Otherwise the summary is stored as a custom weekplan entry (app shape).
         """
         start = kwargs["dtstart"]
         day = start.date() if isinstance(start, datetime) else start
         description = kwargs.get("description") or ""
         match = _RECIPE_ID_RE.search(description)
-        if match:
-            await self.coordinator.client.set_weekplan_day(
-                match.group(1), day, enabled=True, custom=False
-            )
-        else:
-            recipe_id = (kwargs.get("summary") or "custom").strip() or "custom"
-            await self.coordinator.client.set_weekplan_day(
-                recipe_id, day, enabled=True, custom=True
-            )
+        try:
+            if match:
+                await self.coordinator.client.set_weekplan_day(
+                    match.group(1), day, enabled=True, custom=False
+                )
+            else:
+                title = (kwargs.get("summary") or "custom").strip() or "custom"
+                await self.coordinator.client.set_weekplan_day(
+                    title, day, enabled=True, custom=True
+                )
+        except FwlAuthError as err:
+            self.coordinator.entry.async_start_reauth(self.hass)
+            raise HomeAssistantError("food with love authentication expired") from err
+        except FwlApiError as err:
+            raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()
 
     async def async_delete_event(
@@ -114,20 +122,56 @@ class FwlWeekplanCalendar(
         recurrence_id: str | None = None,
         recurrence_range: str | None = None,
     ) -> None:
-        """Remove a meal from the week plan."""
-        if "_" not in uid:
-            return
-        day_key, recipe_id = uid.split("_", 1)
+        """Remove a meal from the week plan using the typed event UID."""
+        parsed = _parse_event_uid(uid)
+        if parsed is None:
+            raise HomeAssistantError(f"Unsupported weekplan event id: {uid}")
+        kind, day_key, key = parsed
         day = datetime.strptime(day_key, "%Y%m%d").date()
-        custom = False
-        for item in self.coordinator.data.get("weekplan") or []:
-            if item.get("day_key") == day_key and item.get("recipe_id") == recipe_id:
-                custom = bool(item.get("custom"))
-                break
-        await self.coordinator.client.set_weekplan_day(
-            recipe_id, day, enabled=False, custom=custom
-        )
+        try:
+            await self.coordinator.client.set_weekplan_day(
+                key, day, enabled=False, custom=(kind == "c")
+            )
+        except FwlAuthError as err:
+            self.coordinator.entry.async_start_reauth(self.hass)
+            raise HomeAssistantError("food with love authentication expired") from err
+        except FwlApiError as err:
+            raise HomeAssistantError(str(err)) from err
         await self.coordinator.async_request_refresh()
+
+
+def _event_uid(*, custom: bool, day_key: str, key: str) -> str:
+    """Stable UID: ``w_{day}_{recipeId}`` or ``c_{day}_{urlencoded title}``."""
+    prefix = "c" if custom else "w"
+    safe_key = quote_uid_part(key)
+    return f"{prefix}_{day_key}_{safe_key}"
+
+
+def quote_uid_part(value: str) -> str:
+    return value.replace("%", "%25").replace("_", "%5F").replace("/", "%2F")
+
+
+def unquote_uid_part(value: str) -> str:
+    return (
+        value.replace("%2F", "/")
+        .replace("%5F", "_")
+        .replace("%25", "%")
+    )
+
+
+def _parse_event_uid(uid: str) -> tuple[str, str, str] | None:
+    if uid.startswith(("w_", "c_")) and len(uid) > 12:
+        kind = uid[0]
+        rest = uid[2:]
+        day_key, _, key = rest.partition("_")
+        if len(day_key) == 8 and day_key.isdigit() and key:
+            return kind, day_key, unquote_uid_part(key)
+    # Legacy UID from v0.3: ``{day_key}_{recipe_id}`` — assume catalog.
+    if "_" in uid:
+        day_key, recipe_id = uid.split("_", 1)
+        if len(day_key) == 8 and day_key.isdigit() and recipe_id:
+            return "w", day_key, recipe_id
+    return None
 
 
 def _to_event(item: dict[str, Any]) -> CalendarEvent:
@@ -143,5 +187,9 @@ def _to_event(item: dict[str, Any]) -> CalendarEvent:
         end=day + timedelta(days=1),
         summary=title,
         description="; ".join(description_parts) or None,
-        uid=f"{item.get('day_key')}_{item.get('recipe_id')}",
+        uid=_event_uid(
+            custom=bool(item.get("custom")),
+            day_key=item.get("day_key") or day.strftime("%Y%m%d"),
+            key=item.get("recipe_id") or title,
+        ),
     )

@@ -15,7 +15,6 @@ from .const import (
     ATTR_AUTHENTICATED,
     ATTR_CATEGORIES,
     ATTR_CONTENT,
-    ATTR_EMAIL,
     ATTR_FAVORITE_COUNT,
     ATTR_FAVORITE_FOLDERS,
     ATTR_GREETING_DATE,
@@ -28,8 +27,6 @@ from .const import (
     ATTR_SERVING_TYPE,
     ATTR_SERVINGS,
     ATTR_THUMB_URL,
-    ATTR_TRANSLATIONS,
-    CONF_EMAIL,
     CONF_REFRESH_TOKEN,
     DOMAIN,
 )
@@ -108,11 +105,7 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
     def _update_from_coordinator(self) -> None:
         data = self.coordinator.data or {}
         key = self.entity_description.key
-
-        auth_attrs = {
-            ATTR_AUTHENTICATED: bool(data.get("authenticated")),
-            ATTR_EMAIL: self.coordinator.entry.data.get(CONF_EMAIL),
-        }
+        auth_attrs = {ATTR_AUTHENTICATED: bool(data.get("authenticated"))}
 
         if key == SENSOR_TODAY:
             recipe = data.get("recipe") or {}
@@ -121,7 +114,7 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
             image = _first(recipe.get("fullUrls")) or thumb
             self._attr_entity_picture = thumb
             self._attr_extra_state_attributes = {
-                ATTR_RECIPE_ID: recipe.get("id") or recipe.get("_today_recipe_id"),
+                ATTR_RECIPE_ID: recipe.get("id"),
                 ATTR_PREPARATION_TIME: recipe.get("preparationTime"),
                 ATTR_SERVINGS: recipe.get("servingsNumber"),
                 ATTR_SERVING_TYPE: recipe.get("servingType"),
@@ -144,14 +137,9 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
             self._attr_extra_state_attributes = {
                 ATTR_FAVORITE_COUNT: favorites.get("count", 0),
                 ATTR_FAVORITE_FOLDERS: [
-                    {
-                        "name": f.get("name"),
-                        "count": f.get("count"),
-                        "recipe_ids": f.get("recipe_ids"),
-                    }
+                    {"name": f.get("name"), "count": f.get("count")}
                     for f in folders
                 ],
-                "recipe_ids": favorites.get("recipe_ids") or [],
                 **auth_attrs,
             }
             return
@@ -166,7 +154,6 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
         self._attr_entity_picture = None
         self._attr_extra_state_attributes = {
             ATTR_GREETING_DATE: greeting.get("date"),
-            ATTR_TRANSLATIONS: translations,
             **auth_attrs,
         }
 
