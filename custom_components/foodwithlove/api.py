@@ -672,6 +672,11 @@ class FwlApiClient:
             event["app_url"] = APP_RECIPE_URL.format(recipe_id=rid) if rid else None
             if info.get("preparation_time") is not None:
                 event["preparation_time"] = info["preparation_time"]
+            # Default yield from the recipe catalog — not stored on the weekplan.
+            if info.get("servings") is not None:
+                event["servings"] = info["servings"]
+            if info.get("serving_type"):
+                event["serving_type"] = info["serving_type"]
 
         events.sort(key=lambda e: (e["date"], e.get("title") or ""))
         return events
@@ -703,6 +708,8 @@ class FwlApiClient:
                     "image_url": image,
                     "thumb_url": thumb,
                     "preparation_time": recipe.get("preparationTime"),
+                    "servings": recipe.get("servingsNumber"),
+                    "serving_type": recipe.get("servingType"),
                 }
         return out
 

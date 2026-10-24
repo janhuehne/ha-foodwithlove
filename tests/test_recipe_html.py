@@ -63,3 +63,6 @@ def test_render_recipe_html_includes_ingredients_and_steps():
     assert "Zubereitung" in html
     assert "175°C" in html
     assert 'data-panel="pot"' in html
+    assert 'id="servings-ctrl"' in html
+    assert 'data-qty="5"' in html
+    assert "const BASE = 12.0" in html or "const BASE = 12" in html

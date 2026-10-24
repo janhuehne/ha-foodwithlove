@@ -41,7 +41,7 @@ FIRESTORE_BASE: Final = (
 IDENTITY_URL: Final = "https://identitytoolkit.googleapis.com/v1"
 SECURE_TOKEN_URL: Final = "https://securetoken.googleapis.com/v1/token"
 
-USER_AGENT: Final = "HomeAssistant-foodwithlove/0.5.0"
+USER_AGENT: Final = "HomeAssistant-foodwithlove/0.5.2"
 
 SUPPORTED_LANGUAGES: Final = {
     "de": "Deutsch",

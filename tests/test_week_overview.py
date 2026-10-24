@@ -31,6 +31,8 @@ def test_week_overview_matches_app_shape():
             "image_url": "https://example.com/g.webp",
             "app_url": "https://www.foodwithlove.de/app/?recipe=rTi6KZH63rUZQRInqe7T",
             "preparation_time": 30,
+            "servings": 4,
+            "serving_type": "Portionen",
         }
     ]
     days = mod.build_week_overview(
@@ -46,6 +48,9 @@ def test_week_overview_matches_app_shape():
     assert tue["meals"][0]["viewer_url"] == (
         "/api/foodwithlove/recipe/rTi6KZH63rUZQRInqe7T"
     )
+    assert tue["meals"][0]["servings"] == 4
+    assert tue["meals"][0]["serving_type"] == "Portionen"
+    assert tue["meals"][0]["date"] == "2026-10-20"
     sat = days[5]
     assert sat["is_today"] is True
     assert sat["empty"] is True

@@ -13,8 +13,11 @@ from .const import (
     CONF_REFRESH_TOKEN,
     CONF_UID,
     DEFAULT_LANGUAGE,
+    DOMAIN,
 )
 from .coordinator import FwlDataUpdateCoordinator
+from .frontend import async_setup_frontend
+from .services import async_setup_services, async_unload_services
 from .views import async_setup_views
 
 # Always forward all platforms so unload stays stable across public↔auth.
@@ -36,6 +39,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.runtime_data = coordinator
     async_setup_views(hass)
+    await async_setup_frontend(hass)
+    await async_setup_services(hass)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -52,4 +57,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded and not hass.config_entries.async_entries(DOMAIN):
+        await async_unload_services(hass)
+    return unloaded

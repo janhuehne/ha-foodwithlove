@@ -15,8 +15,9 @@ Unofficial Home Assistant integration for **[food with love](https://www.foodwit
 |---|---|---|
 | Recipe of the day | no | Title, image, prep time, servings, app + large-screen viewer link |
 | Morning greeting | no | Daily greeting text |
-| Week overview | Magic Link | Mon–Sun meal plan with images and app links |
+| Week overview | Magic Link | Mon–Sun meal plan with images and smart open links |
 | Week plan calendar | Magic Link | Create / delete planned meals |
+| Remove from week plan | Magic Link | Service `foodwithlove.remove_weekplan_meal` + × on week card |
 | Favorites | Magic Link | Count + folders |
 | Shopping list todo | Magic Link | Check off / delete syncs back to FWL |
 | Options | — | Poll interval, calendar window |
@@ -51,7 +52,9 @@ Already installed without login? Open the integration → **Reconfigure** to lin
 
 App deep links use `https://www.foodwithlove.de/app/?recipe=<id>` (opens in the FWL app when installed).
 
-Full recipe on a large screen (no FWL app): open the `viewer_url` attribute on the recipe-of-the-day sensor (or a week-overview meal). That is an HA login–protected page at `/api/foodwithlove/recipe/<id>` with ingredients and steps.
+Full recipe on a large screen (no FWL app): `viewer_url` on the recipe-of-the-day sensor / week-overview meals points to an HA login–protected page at `/api/foodwithlove/recipe/<id>` (ingredients + steps).
+
+The Lovelace cards open **App on mobile**, **HA viewer overlay on desktop** (with a “Neuer Tab” option).
 
 ### Calendar create tip
 
@@ -59,10 +62,19 @@ To add a catalog recipe, create a calendar event with `recipe_id=<id>` in the de
 
 ## Lovelace
 
-A sample Food dashboard can use:
+Built-in cards (auto-loaded with the integration):
 
-- `sensor.food_with_love_rezept_des_tages` (image + `app_url`)
-- `sensor.food_with_love_wochenuberblick` (`days` attribute — app-style week list)
+```yaml
+type: custom:fwl-week-card
+entity: sensor.food_with_love_wochenuberblick
+
+type: custom:fwl-recipe-card
+entity: sensor.food_with_love_rezept_des_tages
+greeting_entity: sensor.food_with_love_morgengruss
+```
+
+Also useful:
+
 - `todo.food_with_love_einkaufsliste`
 - `sensor.food_with_love_favoriten`
 
