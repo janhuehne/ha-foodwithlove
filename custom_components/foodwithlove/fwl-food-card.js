@@ -141,39 +141,79 @@
     return d.textContent || d.innerText || "";
   }
 
-  function linkLabel() {
+  function openHint() {
     return preferApp() ? "In App öffnen" : "Rezept öffnen";
   }
 
-  function mealRow(meal, dayDate) {
+  function openDataAttrs(appUrl, viewerUrl) {
+    return `data-app="${esc(appUrl || "")}" data-viewer="${esc(viewerUrl || "")}"`;
+  }
+
+  /** Compact open affordance — book icon, no wrapping text link. */
+  function openIconButton(appUrl, viewerUrl) {
+    if (!appUrl && !viewerUrl) return "";
+    return `<button type="button" class="fwl-open fwl-icon-btn" ${openDataAttrs(appUrl, viewerUrl)} title="${esc(openHint())}" aria-label="${esc(openHint())}">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        <path d="M12 2v20"/>
+      </svg>
+    </button>`;
+  }
+
+  function metaLine(meal) {
+    const parts = [];
+    if (meal.preparation_time != null && meal.preparation_time !== "") {
+      parts.push(`${meal.preparation_time} min`);
+    }
+    if (meal.rating != null && meal.rating !== "") {
+      const votes =
+        meal.rating_count != null && meal.rating_count !== ""
+          ? ` (${meal.rating_count})`
+          : "";
+      parts.push(`★ ${meal.rating}${votes}`);
+    }
+    return parts.length
+      ? `<div class="fwl-prep">${esc(parts.join(" · "))}</div>`
+      : "";
+  }
+
+  function mealMain(meal, imgSize) {
     const title = esc(meal.title || "");
-    const prep = meal.preparation_time
-      ? ` · ${esc(meal.preparation_time)} min`
-      : "";
+    const prep = metaLine(meal);
+    const size = imgSize || 72;
     const img = meal.image_url
-      ? `<img src="${esc(meal.image_url)}" alt="" width="72" style="width:72px;max-width:72px;height:auto;border-radius:8px;vertical-align:middle;margin-right:8px;" />`
+      ? `<img src="${esc(meal.image_url)}" alt="" width="${size}" style="width:${size}px;max-width:${size}px;height:auto;border-radius:8px;flex:0 0 auto;" />`
       : "";
+    const text = `<div class="fwl-text"><strong>${title}</strong>${prep}</div>`;
     const canOpen = meal.app_url || meal.viewer_url;
-    const open = canOpen
-      ? ` · <a href="#" class="fwl-open" data-app="${esc(meal.app_url || "")}" data-viewer="${esc(meal.viewer_url || "")}">${esc(linkLabel())}</a>`
-      : "";
+    if (!canOpen) {
+      return `<div class="fwl-main">${img}${text}</div>`;
+    }
+    return `<button type="button" class="fwl-open fwl-main" ${openDataAttrs(meal.app_url, meal.viewer_url)} title="${esc(openHint())}">
+      ${img}${text}
+    </button>`;
+  }
+
+  function mealRow(meal, dayDate) {
     const date = meal.date || dayDate || "";
     const custom = meal.custom ? "1" : "0";
     const key = meal.custom ? meal.title || "" : meal.recipe_id || "";
     const remove =
       date && key
-        ? ` <button type="button" class="fwl-remove" title="Aus Wochenplan entfernen" aria-label="Entfernen" data-date="${esc(date)}" data-key="${esc(key)}" data-custom="${custom}" data-title="${esc(meal.title || "")}">×</button>`
+        ? `<button type="button" class="fwl-remove" title="Aus Wochenplan entfernen" aria-label="Entfernen" data-date="${esc(date)}" data-key="${esc(key)}" data-custom="${custom}" data-title="${esc(meal.title || "")}">×</button>`
         : "";
-    return `<div class="fwl-meal" style="margin:.35rem 0 .7rem;display:flex;align-items:center;gap:.35rem;"><div style="flex:1;min-width:0;">${img}<strong>${title}</strong>${prep}${open}</div>${remove}</div>`;
+    return `<div class="fwl-meal">${mealMain(meal, 72)}${openIconButton(meal.app_url, meal.viewer_url)}${remove}</div>`;
   }
 
   function bindOpens(root, hass) {
-    root.querySelectorAll("a.fwl-open").forEach((a) => {
-      a.addEventListener("click", (ev) => {
+    root.querySelectorAll(".fwl-open").forEach((el) => {
+      el.addEventListener("click", (ev) => {
         ev.preventDefault();
+        ev.stopPropagation();
         openRecipe(hass, {
-          appUrl: a.getAttribute("data-app") || "",
-          viewerUrl: a.getAttribute("data-viewer") || "",
+          appUrl: el.getAttribute("data-app") || "",
+          viewerUrl: el.getAttribute("data-viewer") || "",
         });
       });
     });
@@ -250,7 +290,7 @@
       }
       root.innerHTML = `
         <ha-card>
-          <style>
+          <style>${sharedRowStyles()}
             button.fwl-remove {
               appearance: none; border: 1px solid var(--divider-color, #ddd);
               background: transparent; color: var(--secondary-text-color);
@@ -268,6 +308,32 @@
       bindOpens(root, this._hass);
       bindRemoves(root, this._hass);
     }
+  }
+
+  function sharedRowStyles() {
+    return `
+      .fwl-meal, .fwl-fav-recipe {
+        margin: .35rem 0 .7rem; display: flex; align-items: center; gap: .4rem;
+      }
+      button.fwl-main {
+        appearance: none; border: 0; background: transparent; color: inherit;
+        font: inherit; text-align: left; cursor: pointer; flex: 1; min-width: 0;
+        display: flex; align-items: center; gap: .55rem; padding: 0;
+      }
+      button.fwl-main:hover strong { text-decoration: underline; }
+      .fwl-main { display: flex; align-items: center; gap: .55rem; flex: 1; min-width: 0; }
+      .fwl-text { min-width: 0; line-height: 1.3; }
+      .fwl-text strong { display: block; }
+      .fwl-prep { opacity: .75; font-weight: 400; font-size: .92em; margin-top: .15rem; }
+      button.fwl-icon-btn {
+        appearance: none; border: 1px solid var(--divider-color, #ddd);
+        background: transparent; color: var(--primary-color, #03a9f4);
+        width: 1.75rem; height: 1.75rem; border-radius: 999px;
+        display: inline-flex; align-items: center; justify-content: center;
+        cursor: pointer; flex: 0 0 auto; padding: 0;
+      }
+      button.fwl-icon-btn:hover { border-color: currentColor; }
+    `;
   }
 
   class FwlRecipeCard extends HTMLElement {
@@ -296,29 +362,45 @@
       const title = st ? st.state : "";
       const img =
         attrs.thumb_url || attrs.entity_picture || attrs.image_url || "";
-      const prep = attrs.preparation_time;
       const metaBits = [];
-      if (prep) metaBits.push(`${prep} min`);
+      if (attrs.preparation_time != null && attrs.preparation_time !== "") {
+        metaBits.push(`${attrs.preparation_time} min`);
+      }
+      if (attrs.rating != null && attrs.rating !== "") {
+        const votes =
+          attrs.rating_count != null && attrs.rating_count !== ""
+            ? ` (${attrs.rating_count})`
+            : "";
+        metaBits.push(`★ ${attrs.rating}${votes}`);
+      }
       const content = stripHtml(
         String(attrs.content || "")
           .replace(/<br\s*\/?>/gi, " ")
       );
       const canOpen = attrs.app_url || attrs.viewer_url;
       const root = this.shadowRoot || this.attachShadow({ mode: "open" });
-      root.innerHTML = `
-        <ha-card>
-          <div style="padding:12px 16px 16px;">
-            ${this._config.title ? `<h2 style="margin:0 0 .5rem;font-size:1.1rem;">${esc(this._config.title)}</h2>` : ""}
+      const head = canOpen
+        ? `<button type="button" class="fwl-open fwl-today" ${openDataAttrs(attrs.app_url, attrs.viewer_url)} title="${esc(openHint())}">
             ${img ? `<img src="${esc(img)}" alt="" width="120" style="width:120px;max-width:120px;height:auto;border-radius:10px;" />` : ""}
             <h3 style="margin:.5rem 0 .25rem;">${esc(title)}</h3>
+          </button>`
+        : `${img ? `<img src="${esc(img)}" alt="" width="120" style="width:120px;max-width:120px;height:auto;border-radius:10px;" />` : ""}
+           <h3 style="margin:.5rem 0 .25rem;">${esc(title)}</h3>`;
+      root.innerHTML = `
+        <ha-card>
+          <style>
+            button.fwl-today {
+              appearance: none; border: 0; background: transparent; color: inherit;
+              font: inherit; text-align: left; cursor: pointer; display: block; padding: 0; width: 100%;
+            }
+            button.fwl-today:hover h3 { text-decoration: underline; }
+          </style>
+          <div style="padding:12px 16px 16px;">
+            ${this._config.title ? `<h2 style="margin:0 0 .5rem;font-size:1.1rem;">${esc(this._config.title)}</h2>` : ""}
+            ${head}
             ${metaBits.length ? `<div style="opacity:.8;margin-bottom:.5rem;">${esc(metaBits.join(" · "))}</div>` : ""}
             ${greeting ? `<div style="font-style:italic;margin-bottom:.75rem;">${esc(greeting)}</div>` : ""}
             ${content ? `<div style="margin-bottom:.75rem;line-height:1.45;">${esc(content)}</div>` : ""}
-            ${
-              canOpen
-                ? `<a href="#" class="fwl-open" data-app="${esc(attrs.app_url || "")}" data-viewer="${esc(attrs.viewer_url || "")}" style="font-weight:600;">${esc(linkLabel())}</a>`
-                : ""
-            }
           </div>
         </ha-card>`;
       bindOpens(root, this._hass);
@@ -392,25 +474,11 @@
   }
 
   function favoriteRecipeRow(recipe) {
-    const title = esc(recipe.title || recipe.recipe_id || "");
-    const prep = recipe.preparation_time
-      ? ` · ${esc(recipe.preparation_time)} min`
-      : "";
-    const img = recipe.image_url
-      ? `<img src="${esc(recipe.image_url)}" alt="" width="56" style="width:56px;max-width:56px;height:auto;border-radius:8px;vertical-align:middle;margin-right:8px;" />`
-      : "";
-    const canOpen = recipe.app_url || recipe.viewer_url;
-    const open = canOpen
-      ? `<a href="#" class="fwl-open" data-app="${esc(recipe.app_url || "")}" data-viewer="${esc(recipe.viewer_url || "")}">${esc(linkLabel())}</a>`
-      : "";
     const rid = recipe.recipe_id || "";
     const add = rid
-      ? `<button type="button" class="fwl-add" title="Zum Wochenplan" aria-label="Zum Wochenplan" data-recipe-id="${esc(rid)}" data-title="${title}">+</button>`
+      ? `<button type="button" class="fwl-add" title="Zum Wochenplan" aria-label="Zum Wochenplan" data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}">+</button>`
       : "";
-    return `<div class="fwl-fav-recipe" style="display:flex;align-items:center;gap:.4rem;margin:.3rem 0 .55rem;">
-      <div style="flex:1;min-width:0;">${img}<strong>${title}</strong>${prep}${open ? ` · ${open}` : ""}</div>
-      ${add}
-    </div>`;
+    return `<div class="fwl-fav-recipe">${mealMain(recipe, 56)}${openIconButton(recipe.app_url, recipe.viewer_url)}${add}</div>`;
   }
 
   class FwlFavoritesCard extends HTMLElement {
@@ -488,7 +556,7 @@
 
       root.innerHTML = `
         <ha-card>
-          <style>
+          <style>${sharedRowStyles()}
             .pad { padding: 12px 16px 16px; }
             .summary { opacity: .75; margin-bottom: .65rem; font-size: .95rem; }
             .fwl-folder { border-top: 1px solid var(--divider-color, #3333); }

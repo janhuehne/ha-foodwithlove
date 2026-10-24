@@ -14,6 +14,8 @@ _SAMPLE_RECIPE = {
     "preparationTime": 75,
     "servingsNumber": 12,
     "servingType": "Stücke",
+    "rating": 4.5,
+    "ratingCount": 46,
     "ingredients": [
         {
             "type": "Basis",
@@ -66,3 +68,4 @@ def test_render_recipe_html_includes_ingredients_and_steps():
     assert 'id="servings-ctrl"' in html
     assert 'data-qty="5"' in html
     assert "const BASE = 12.0" in html or "const BASE = 12" in html
+    assert "★ 4.5 (46)" in html

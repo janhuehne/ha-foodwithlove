@@ -55,6 +55,8 @@ def build_week_overview(
             "preparation_time": item.get("preparation_time"),
             "servings": item.get("servings"),
             "serving_type": item.get("serving_type"),
+            "rating": item.get("rating"),
+            "rating_count": item.get("rating_count"),
         }
         by_day.setdefault(day, []).append(meal)
 

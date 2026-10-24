@@ -26,6 +26,8 @@ from .const import (
     ATTR_IS_PREMIUM,
     ATTR_NOTE,
     ATTR_PREPARATION_TIME,
+    ATTR_RATING,
+    ATTR_RATING_COUNT,
     ATTR_RECIPE_ID,
     ATTR_SERVING_TYPE,
     ATTR_SERVINGS,
@@ -148,6 +150,8 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
                 ATTR_VIEWER_URL: (
                     recipe_viewer_path(recipe_id) if recipe_id else None
                 ),
+                ATTR_RATING: recipe.get("rating"),
+                ATTR_RATING_COUNT: recipe.get("ratingCount"),
                 **auth_attrs,
             }
             return

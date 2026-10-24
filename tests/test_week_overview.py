@@ -33,6 +33,8 @@ def test_week_overview_matches_app_shape():
             "preparation_time": 30,
             "servings": 4,
             "serving_type": "Portionen",
+            "rating": 4.5,
+            "rating_count": 21,
         }
     ]
     days = mod.build_week_overview(
@@ -51,6 +53,8 @@ def test_week_overview_matches_app_shape():
     assert tue["meals"][0]["servings"] == 4
     assert tue["meals"][0]["serving_type"] == "Portionen"
     assert tue["meals"][0]["date"] == "2026-10-20"
+    assert tue["meals"][0]["rating"] == 4.5
+    assert tue["meals"][0]["rating_count"] == 21
     sat = days[5]
     assert sat["is_today"] is True
     assert sat["empty"] is True

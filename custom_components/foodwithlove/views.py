@@ -49,6 +49,11 @@ class FwlRecipeView(HomeAssistantView):
 
         try:
             recipe = await _resolve_recipe(coordinator, recipe_id)
+            rating_info = (await coordinator.client.get_ratings_map()).get(
+                recipe_id
+            ) or {}
+            recipe["rating"] = rating_info.get("rating")
+            recipe["ratingCount"] = rating_info.get("count")
         except FwlApiError as err:
             _LOGGER.warning("Recipe viewer failed for %s: %s", recipe_id, err)
             return web.Response(status=502, text=f"Could not load recipe: {err}")

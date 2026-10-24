@@ -42,6 +42,11 @@ def render_recipe_html(recipe: dict[str, Any], *, language: str = "de") -> str:
     meta_bits: list[str] = []
     if prep:
         meta_bits.append(f"{prep} min")
+    rating = recipe.get("rating")
+    rating_count = recipe.get("ratingCount")
+    if rating is not None:
+        votes = f" ({rating_count})" if rating_count is not None else ""
+        meta_bits.append(f"★ {rating}{votes}")
     meta = " · ".join(meta_bits)
 
     image = _first_url(recipe.get("fullUrls")) or _first_url(recipe.get("thumbUrls"))
@@ -89,7 +94,6 @@ def render_recipe_html(recipe: dict[str, Any], *, language: str = "de") -> str:
         if tip
         else ""
     )
-    close_label = "Schließen" if de else "Close"
     footer = (
         "Inoffizielle food-with-love-Ansicht · nur für persönlichen Gebrauch"
         if de
@@ -134,22 +138,9 @@ def render_recipe_html(recipe: dict[str, Any], *, language: str = "de") -> str:
       color: var(--ink);
       line-height: 1.45;
     }}
-    .bar {{
-      position: sticky; top: 0; z-index: 2;
-      display: flex; justify-content: flex-end;
-      padding: 0.75rem 1.25rem;
-      background: color-mix(in srgb, var(--bg) 92%, transparent);
-      backdrop-filter: blur(8px);
-    }}
-    .close {{
-      appearance: none; border: 1px solid var(--line);
-      background: var(--card); color: var(--ink);
-      border-radius: 999px; padding: 0.55rem 1.1rem;
-      font-size: 1rem; cursor: pointer;
-    }}
     main {{
       max-width: 52rem; margin: 0 auto;
-      padding: 0.5rem 1.5rem 3rem;
+      padding: 1rem 1.5rem 3rem;
     }}
     .hero {{
       width: 100%; max-height: 42vh; object-fit: cover;
@@ -228,9 +219,6 @@ def render_recipe_html(recipe: dict[str, Any], *, language: str = "de") -> str:
   </style>
 </head>
 <body>
-  <div class="bar">
-    <button type="button" class="close" onclick="if (history.length > 1) history.back(); else window.close();">{close_label}</button>
-  </div>
   <main>
     {image_html}
     <h1>{title}</h1>

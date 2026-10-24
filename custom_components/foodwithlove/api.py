@@ -192,6 +192,8 @@ class FwlApiClient:
         self._id_token_expires_at = 0.0
         self._recipe_index: dict[str, str] | None = None
         self._recipe_index_fetched_at = 0.0
+        self._ratings: dict[str, dict[str, Any]] | None = None
+        self._ratings_fetched_at = 0.0
 
     @property
     def language(self) -> str:
@@ -325,6 +327,32 @@ class FwlApiClient:
             }
             self._recipe_index_fetched_at = time.time()
         return self._recipe_index
+
+    async def get_ratings_map(self, *, force: bool = False) -> dict[str, dict[str, Any]]:
+        """Public ``/ratings/`` map: ``{ recipeId: { rating, count, score } }``."""
+        stale = (
+            self._ratings is not None
+            and time.time() - self._ratings_fetched_at > 3600
+        )
+        if self._ratings is None or force or stale:
+            try:
+                raw = await self._get_json("/ratings/")
+            except FwlApiError as err:
+                _LOGGER.warning("Failed to load ratings map: %s", err)
+                return self._ratings or {}
+            out: dict[str, dict[str, Any]] = {}
+            if isinstance(raw, dict):
+                for rid, info in raw.items():
+                    if not isinstance(info, dict):
+                        continue
+                    out[str(rid)] = {
+                        "rating": info.get("rating"),
+                        "count": info.get("count"),
+                        "score": info.get("score"),
+                    }
+            self._ratings = out
+            self._ratings_fetched_at = time.time()
+        return self._ratings
 
     async def get_recipe(self, recipe_id: str, content_hash: str) -> dict[str, Any]:
         path = f"/api/v1/recipe/{quote(recipe_id)}/{quote(content_hash)}"
@@ -677,6 +705,10 @@ class FwlApiClient:
                 event["servings"] = info["servings"]
             if info.get("serving_type"):
                 event["serving_type"] = info["serving_type"]
+            if info.get("rating") is not None:
+                event["rating"] = info["rating"]
+            if info.get("rating_count") is not None:
+                event["rating_count"] = info["rating_count"]
 
         events.sort(key=lambda e: (e["date"], e.get("title") or ""))
         return events
@@ -688,6 +720,7 @@ class FwlApiClient:
         if not recipe_ids:
             return {}
         index = await self.get_recipe_index_map()
+        ratings = await self.get_ratings_map()
         known = [rid for rid in recipe_ids if rid in index]
         out: dict[str, dict[str, Any]] = {}
         chunk_size = 20
@@ -704,12 +737,15 @@ class FwlApiClient:
                     continue
                 thumb = _first_url(recipe.get("thumbUrls"))
                 image = _first_url(recipe.get("fullUrls")) or thumb
+                rating_info = ratings.get(rid) or {}
                 out[rid] = {
                     "image_url": image,
                     "thumb_url": thumb,
                     "preparation_time": recipe.get("preparationTime"),
                     "servings": recipe.get("servingsNumber"),
                     "serving_type": recipe.get("servingType"),
+                    "rating": rating_info.get("rating"),
+                    "rating_count": rating_info.get("count"),
                 }
         return out
 
@@ -920,6 +956,8 @@ class FwlApiClient:
                 "app_url": APP_RECIPE_URL.format(recipe_id=rid),
                 "viewer_url": f"/api/foodwithlove/recipe/{rid}",
                 "preparation_time": info.get("preparation_time"),
+                "rating": info.get("rating"),
+                "rating_count": info.get("rating_count"),
             }
 
         folders: list[dict[str, Any]] = []
@@ -972,6 +1010,11 @@ class FwlApiClient:
         """Fetch greeting, today recipe, and optional account data."""
         greeting = await self.morning_greeting()
         recipe = await self.today_recipe()
+        recipe_id = recipe.get("id") if isinstance(recipe, dict) else None
+        if recipe_id:
+            rating_info = (await self.get_ratings_map()).get(recipe_id) or {}
+            recipe["rating"] = rating_info.get("rating")
+            recipe["ratingCount"] = rating_info.get("count")
         data: dict[str, Any] = {
             "greeting": greeting,
             "recipe": recipe,
