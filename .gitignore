@@ -9,59 +9,38 @@ jadx_out/
 urls.txt
 sample_*.json
 today_recipe.json
+poc/
+
+# Secrets / local auth
+.fwl_tokens.json
+.fwl_pending_login.json
+.immocloud/
+_janhuehne_local/
 
 # Python
 __pycache__/
 *.py[cod]
-.venv/
-venv/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.venv/
+venv/
+.coverage
+htmlcov/
+*.db
 
-# Misc
+# OS / IDE
 .DS_Store
-.immocloud/
-poc/
-.fwl_tokens.json
-.fwl_pending_login.json
+.idea/
+.vscode/
 
-# Added by Spec Kitty CLI (auto-managed)
+# Spec Kitty / agent tooling (not part of the HA integration)
 .claude/
+.claudeignore
 .codex/
-.vibe/
-.pi/
-.letta/
-.opencode/
-.windsurf/
-.gemini/
 .cursor/
-.qwen/
-.kilocode/
-.augment/
-.amazonq/
-.kiro/
-.agent/
+.kittify/
+.gitattributes
+.agents/
 .github/copilot/
-.agents/skills/
-.kittify/.dashboard
-.kittify/charter/context-state.json
-.kittify/charter/directives.yaml
-.kittify/charter/governance.yaml
-.kittify/charter/metadata.yaml
-.kittify/charter/references.yaml
-.kittify/derived/
-.kittify/dossiers/
-.kittify/encoding-provenance/
-.kittify/events/
-.kittify/logs/
-.kittify/merge-state.json
-.kittify/migrations/
-.kittify/missions/__pycache__/
-.kittify/runtime/
-.kittify/skills-manifest.json
-.kittify/sync-state.json
-.kittify/workspaces/
-kitty-ops/ops-index.jsonl
-_janhuehne_local/

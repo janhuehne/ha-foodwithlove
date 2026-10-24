@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -35,30 +34,12 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import FwlDataUpdateCoordinator
+from .week_overview import build_week_overview
 
 SENSOR_TODAY = "today"
 SENSOR_GREETING = "greeting"
 SENSOR_FAVORITES = "favorites"
 SENSOR_WEEK_OVERVIEW = "week_overview"
-
-_WEEKDAYS_DE = (
-    "Montag",
-    "Dienstag",
-    "Mittwoch",
-    "Donnerstag",
-    "Freitag",
-    "Samstag",
-    "Sonntag",
-)
-_WEEKDAYS_EN = (
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
-)
 
 SENSORS: tuple[SensorEntityDescription, ...] = (
     SensorEntityDescription(
@@ -182,9 +163,10 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
             return
 
         if key == SENSOR_WEEK_OVERVIEW:
-            days = _build_week_overview(
+            days = build_week_overview(
                 data.get("weekplan") or [],
                 language=self.coordinator.client.language,
+                today=dt_util.now().date(),
             )
             today_meals = next(
                 (d["meals"] for d in days if d.get("is_today")),
@@ -224,68 +206,6 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
             ATTR_GREETING_DATE: greeting.get("date"),
             **auth_attrs,
         }
-
-
-def _build_week_overview(
-    weekplan: list[dict[str, Any]], *, language: str
-) -> list[dict[str, Any]]:
-    """Build Mon–Sun overview matching the FWL app Wochenüberblick."""
-    today = dt_util.now().date()
-    monday = today - timedelta(days=today.weekday())
-    by_day: dict[date, list[dict[str, Any]]] = {}
-    for item in weekplan:
-        day = item.get("date")
-        if not isinstance(day, date):
-            continue
-        title = item.get("title") or item.get("recipe_id")
-        if not title:
-            continue
-        meal = {
-            "title": title,
-            "recipe_id": None if item.get("custom") else item.get("recipe_id"),
-            "custom": bool(item.get("custom")),
-            "image_url": item.get("image_url"),
-            "app_url": item.get("app_url"),
-            "preparation_time": item.get("preparation_time"),
-        }
-        by_day.setdefault(day, []).append(meal)
-
-    weekdays = _WEEKDAYS_DE if language == "de" else _WEEKDAYS_EN
-    days: list[dict[str, Any]] = []
-    for offset in range(7):
-        day = monday + timedelta(days=offset)
-        meals = by_day.get(day, [])
-        days.append(
-            {
-                "date": day.isoformat(),
-                "weekday": weekdays[offset],
-                "label": _day_label(day, weekdays[offset], language),
-                "meals": meals,
-                "is_today": day == today,
-                "empty": not meals,
-            }
-        )
-    return days
-
-
-def _day_label(day: date, weekday: str, language: str) -> str:
-    if language == "de":
-        months = (
-            "Januar",
-            "Februar",
-            "März",
-            "April",
-            "Mai",
-            "Juni",
-            "Juli",
-            "August",
-            "September",
-            "Oktober",
-            "November",
-            "Dezember",
-        )
-        return f"{weekday} {day.day}. {months[day.month - 1]}"
-    return f"{weekday} {day.strftime('%d %b')}"
 
 
 def _first(values: Any) -> str | None:

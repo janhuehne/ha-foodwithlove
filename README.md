@@ -1,30 +1,41 @@
 # food with love for Home Assistant
 
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![GitHub release](https://img.shields.io/github/release/janhuehne/ha-foodwithlove.svg)](https://github.com/janhuehne/ha-foodwithlove/releases)
+[![Validate](https://github.com/janhuehne/ha-foodwithlove/actions/workflows/validate.yml/badge.svg)](https://github.com/janhuehne/ha-foodwithlove/actions/workflows/validate.yml)
+
 Unofficial Home Assistant integration for **[food with love](https://www.foodwithlove.de/)**.
 
-> Not affiliated with fwl connect GmbH. Uses a reverse-engineered private API. For personal use only — respect FWL ToS and recipe copyright.
+> Not affiliated with fwl connect GmbH. Uses a reverse-engineered private API.
+> For personal use only — respect FWL ToS and recipe copyright.
 
-## Features (v0.3.1)
+## Features
 
 | Entity / feature | Login | Description |
 |---|---|---|
-| `sensor.*` recipe of the day | no | Today’s recipe (+ time, servings, image, personal note when logged in) |
-| `sensor.*` morning greeting | no | Daily greeting |
-| `sensor.*` favorites | Magic Link | Favorite count + folders |
-| `calendar.*` week plan | Magic Link | Week plan (create/delete events supported) |
-| `todo.*` shopping list | Magic Link | Shopping ingredients; check off / delete writes back to FWL |
-| Options | — | Scan interval, calendar days back/forward |
-| Diagnostics / reauth | — | Redacted diagnostics; Magic Link reauth when token expires |
+| Recipe of the day | no | Title, image, prep time, servings, app deep link |
+| Morning greeting | no | Daily greeting text |
+| Week overview | Magic Link | Mon–Sun meal plan with images and app links |
+| Week plan calendar | Magic Link | Create / delete planned meals |
+| Favorites | Magic Link | Count + folders |
+| Shopping list todo | Magic Link | Check off / delete syncs back to FWL |
+| Options | — | Poll interval, calendar window |
+| Diagnostics / reauth | — | Redacted diagnostics; Magic Link when the token expires |
 
-## Install
+## Requirements
 
-### HACS (custom repository)
+- Home Assistant **2024.12+**
+- Optional: food with love account (Magic Link) for week plan, shopping list, favorites
 
-1. HACS → ⋮ → **Custom repositories**
-2. URL: `https://github.com/janhuehne/ha-foodwithlove` · Category: **Integration**
-3. Download **food with love** (branch `dev` if offered)
+## Install (HACS)
+
+### Custom repository
+
+1. HACS → **Integrations** → ⋮ → **Custom repositories**
+2. URL: `https://github.com/janhuehne/ha-foodwithlove` — category **Integration**
+3. Download **food with love**
 4. Restart Home Assistant
-5. Settings → Devices & services → **Add integration** → *food with love*
+5. Settings → Devices & services → **Add integration** → **food with love**
 
 ### Manual
 
@@ -33,32 +44,39 @@ Copy `custom_components/foodwithlove` into your HA `config/custom_components/` f
 ## Setup
 
 1. Choose language  
-2. Either **Public only** or **Sign in with Magic Link**  
-3. For Magic Link: enter the email of your FWL account → enter the 6-digit code from the mail  
+2. **Public only** or **Sign in with Magic Link**  
+3. For Magic Link: enter your FWL account email → enter the 6-digit code from the mail  
 
 Already installed without login? Open the integration → **Reconfigure** to link your account.
 
+App deep links use `https://www.foodwithlove.de/app/?recipe=<id>` (opens in the FWL app when installed).
+
 ### Calendar create tip
 
-To add a catalog recipe, create a calendar event with `recipe_id=<id>` in the description. Without that, the event summary is stored as a custom weekplan entry.
+To add a catalog recipe, create a calendar event with `recipe_id=<id>` in the description. Without that, the summary is stored as a custom weekplan entry.
 
-## Lovelace example
+## Lovelace
 
-```yaml
-type: markdown
-content: |
-  ### {{ states('sensor.food_with_love_rezept_des_tages') }}
-  {{ state_attr('sensor.food_with_love_rezept_des_tages', 'preparation_time') }} min  
-  _{{ states('sensor.food_with_love_morgengruss') }}_
-```
+A sample Food dashboard can use:
+
+- `sensor.food_with_love_rezept_des_tages` (image + `app_url`)
+- `sensor.food_with_love_wochenuberblick` (`days` attribute — app-style week list)
+- `todo.food_with_love_einkaufsliste`
+- `sensor.food_with_love_favoriten`
 
 Entity IDs vary with language — check **Settings → Devices → food with love**.
 
-## Standalone API smoke test
+## Development
 
 ```bash
-python3 -m pip install -r requirements.txt
-python3 fwl_client.py
+python3 -m pip install -r requirements.txt pytest
+python3 -m pytest tests/ -q
 ```
 
 Technical notes: [docs/REVERSE_ENGINEERING.md](docs/REVERSE_ENGINEERING.md)
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Not affiliated with fwl connect GmbH / food with love.
