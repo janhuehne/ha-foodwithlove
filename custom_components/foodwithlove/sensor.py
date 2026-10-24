@@ -30,10 +30,12 @@ from .const import (
     ATTR_SERVING_TYPE,
     ATTR_SERVINGS,
     ATTR_THUMB_URL,
+    ATTR_VIEWER_URL,
     CONF_REFRESH_TOKEN,
     DOMAIN,
 )
 from .coordinator import FwlDataUpdateCoordinator
+from .recipe_html import recipe_viewer_path
 from .week_overview import build_week_overview
 
 SENSOR_TODAY = "today"
@@ -142,6 +144,9 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
                 ATTR_NOTE: data.get("note"),
                 ATTR_APP_URL: (
                     APP_RECIPE_URL.format(recipe_id=recipe_id) if recipe_id else None
+                ),
+                ATTR_VIEWER_URL: (
+                    recipe_viewer_path(recipe_id) if recipe_id else None
                 ),
                 **auth_attrs,
             }

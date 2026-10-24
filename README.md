@@ -13,7 +13,7 @@ Unofficial Home Assistant integration for **[food with love](https://www.foodwit
 
 | Entity / feature | Login | Description |
 |---|---|---|
-| Recipe of the day | no | Title, image, prep time, servings, app deep link |
+| Recipe of the day | no | Title, image, prep time, servings, app + large-screen viewer link |
 | Morning greeting | no | Daily greeting text |
 | Week overview | Magic Link | Mon–Sun meal plan with images and app links |
 | Week plan calendar | Magic Link | Create / delete planned meals |
@@ -50,6 +50,8 @@ Copy `custom_components/foodwithlove` into your HA `config/custom_components/` f
 Already installed without login? Open the integration → **Reconfigure** to link your account.
 
 App deep links use `https://www.foodwithlove.de/app/?recipe=<id>` (opens in the FWL app when installed).
+
+Full recipe on a large screen (no FWL app): open the `viewer_url` attribute on the recipe-of-the-day sensor (or a week-overview meal). That is an HA login–protected page at `/api/foodwithlove/recipe/<id>` with ingredients and steps.
 
 ### Calendar create tip
 

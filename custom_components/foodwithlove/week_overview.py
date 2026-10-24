@@ -41,12 +41,16 @@ def build_week_overview(
         title = item.get("title") or item.get("recipe_id")
         if not title:
             continue
+        recipe_id = None if item.get("custom") else item.get("recipe_id")
         meal = {
             "title": title,
-            "recipe_id": None if item.get("custom") else item.get("recipe_id"),
+            "recipe_id": recipe_id,
             "custom": bool(item.get("custom")),
             "image_url": item.get("image_url"),
             "app_url": item.get("app_url"),
+            "viewer_url": (
+                f"/api/foodwithlove/recipe/{recipe_id}" if recipe_id else None
+            ),
             "preparation_time": item.get("preparation_time"),
         }
         by_day.setdefault(day, []).append(meal)

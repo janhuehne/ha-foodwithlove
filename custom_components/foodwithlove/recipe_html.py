@@ -1,0 +1,299 @@
+"""Render a full FWL recipe as a large-screen HTML page."""
+
+from __future__ import annotations
+
+import html
+import re
+from typing import Any
+
+# Allow a small HTML subset already present in FWL recipe text.
+_ALLOWED_TAG = re.compile(
+    r"</?(?:br|strong|b|em|i|u|p|ul|ol|li|span|div)\b[^>]*>",
+    re.IGNORECASE,
+)
+_TAG = re.compile(r"<[^>]+>")
+
+
+def recipe_viewer_path(recipe_id: str) -> str:
+    """Relative HA path for the recipe HTML viewer."""
+    return f"/api/foodwithlove/recipe/{recipe_id}"
+
+
+def render_recipe_html(recipe: dict[str, Any], *, language: str = "de") -> str:
+    """Build a self-contained HTML document for kitchen / wall displays."""
+    title = _text(recipe.get("title") or "Rezept")
+    de = language == "de"
+    prep = recipe.get("preparationTime")
+    servings = recipe.get("servingsNumber")
+    serving_type = _text(recipe.get("servingType") or ("Portionen" if de else "servings"))
+    meta_bits: list[str] = []
+    if prep:
+        meta_bits.append(f"{prep} min")
+    if servings:
+        meta_bits.append(f"{servings} {serving_type}")
+    meta = " · ".join(meta_bits)
+
+    image = _first_url(recipe.get("fullUrls")) or _first_url(recipe.get("thumbUrls"))
+    image_html = (
+        f'<img class="hero" src="{html.escape(image, quote=True)}" alt="">'
+        if image
+        else ""
+    )
+
+    intro = _rich(recipe.get("content"))
+    tip = _rich(recipe.get("tip") or recipe.get("potTip"))
+    ingredients_html = _ingredients_block(recipe.get("ingredients") or [], de=de)
+    steps = recipe.get("steps") or []
+    pot_steps = recipe.get("potSteps") or []
+    steps_html = _steps_block(steps, heading=("Zubereitung" if de else "Steps"))
+    pot_html = _steps_block(
+        pot_steps,
+        heading=("Ohne Thermomix" if de else "Without Thermomix"),
+    )
+
+    show_toggle = bool(steps and pot_steps)
+    tabs = ""
+    if show_toggle:
+        tabs = f"""
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab active" data-panel="thermo">
+            {"Thermomix" if de else "Thermomix"}
+          </button>
+          <button type="button" class="tab" data-panel="pot">
+            {"Topf / Ofen" if de else "Pot / oven"}
+          </button>
+        </div>
+        """
+        steps_section = f"""
+        <section id="panel-thermo" class="panel active">{steps_html}</section>
+        <section id="panel-pot" class="panel">{pot_html}</section>
+        """
+    elif pot_steps and not steps:
+        steps_section = f"<section class=\"panel active\">{pot_html}</section>"
+    else:
+        steps_section = f"<section class=\"panel active\">{steps_html}</section>"
+
+    tip_html = (
+        f'<aside class="tip"><strong>{"Tipp" if de else "Tip"}:</strong> {tip}</aside>'
+        if tip
+        else ""
+    )
+    close_label = "Schließen" if de else "Close"
+    footer = (
+        "Inoffizielle food-with-love-Ansicht · nur für persönlichen Gebrauch"
+        if de
+        else "Unofficial food with love view · personal use only"
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="{html.escape(language)}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  <style>
+    :root {{
+      --bg: #f7f3ee;
+      --ink: #1c1917;
+      --muted: #57534e;
+      --accent: #b45309;
+      --card: #fffdf9;
+      --line: #e7e5e4;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.45;
+    }}
+    .bar {{
+      position: sticky; top: 0; z-index: 2;
+      display: flex; justify-content: flex-end;
+      padding: 0.75rem 1.25rem;
+      background: color-mix(in srgb, var(--bg) 92%, transparent);
+      backdrop-filter: blur(8px);
+    }}
+    .close {{
+      appearance: none; border: 1px solid var(--line);
+      background: var(--card); color: var(--ink);
+      border-radius: 999px; padding: 0.55rem 1.1rem;
+      font-size: 1rem; cursor: pointer;
+    }}
+    main {{
+      max-width: 52rem; margin: 0 auto;
+      padding: 0.5rem 1.5rem 3rem;
+    }}
+    .hero {{
+      width: 100%; max-height: 42vh; object-fit: cover;
+      border-radius: 1rem; display: block; margin-bottom: 1.25rem;
+    }}
+    h1 {{
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      line-height: 1.15; margin: 0 0 0.35rem;
+    }}
+    .meta {{ color: var(--muted); font-size: 1.1rem; margin-bottom: 1rem; }}
+    .intro {{ font-size: 1.15rem; margin-bottom: 1.5rem; }}
+    h2 {{
+      font-size: 1.35rem; margin: 1.75rem 0 0.75rem;
+      color: var(--accent);
+    }}
+    .group {{ margin-bottom: 1rem; }}
+    .group-title {{
+      font-weight: 650; font-size: 1.05rem; margin-bottom: 0.35rem;
+    }}
+    ul.ingredients {{
+      list-style: none; padding: 0; margin: 0;
+      display: grid; gap: 0.35rem;
+    }}
+    ul.ingredients li {{
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 0.65rem; padding: 0.55rem 0.8rem;
+      font-size: 1.12rem;
+    }}
+    ol.steps {{
+      padding-left: 1.4rem; margin: 0;
+      display: grid; gap: 0.9rem;
+    }}
+    ol.steps li {{ font-size: 1.15rem; padding-left: 0.35rem; }}
+    .tip {{
+      margin-top: 1.5rem; padding: 1rem 1.1rem;
+      background: #fff7ed; border-left: 4px solid var(--accent);
+      border-radius: 0.5rem;
+    }}
+    .tabs {{
+      display: flex; gap: 0.5rem; margin: 1.25rem 0 0.5rem;
+    }}
+    .tab {{
+      appearance: none; border: 1px solid var(--line);
+      background: var(--card); border-radius: 999px;
+      padding: 0.5rem 1rem; cursor: pointer; font-size: 1rem;
+    }}
+    .tab.active {{
+      background: var(--ink); color: #fff; border-color: var(--ink);
+    }}
+    .panel {{ display: none; }}
+    .panel.active {{ display: block; }}
+    footer {{
+      margin-top: 2.5rem; color: var(--muted); font-size: 0.85rem;
+    }}
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <button type="button" class="close" onclick="if (history.length > 1) history.back(); else window.close();">{close_label}</button>
+  </div>
+  <main>
+    {image_html}
+    <h1>{title}</h1>
+    <div class="meta">{html.escape(meta)}</div>
+    {f'<div class="intro">{intro}</div>' if intro else ""}
+    {ingredients_html}
+    {tabs}
+    {steps_section}
+    {tip_html}
+    <footer>{html.escape(footer)}</footer>
+  </main>
+  <script>
+    document.querySelectorAll(".tab").forEach((btn) => {{
+      btn.addEventListener("click", () => {{
+        document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+        btn.classList.add("active");
+        const panel = document.getElementById("panel-" + btn.dataset.panel);
+        if (panel) panel.classList.add("active");
+      }});
+    }});
+  </script>
+</body>
+</html>
+"""
+
+
+def _ingredients_block(groups: list[Any], *, de: bool) -> str:
+    if not groups:
+        return ""
+    parts = [f"<h2>{'Zutaten' if de else 'Ingredients'}</h2>"]
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        items = group.get("ingredients") or []
+        group_type = group.get("type")
+        body = ['<ul class="ingredients">']
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            line = _ingredient_line(item)
+            if line:
+                body.append(f"<li>{html.escape(line)}</li>")
+        body.append("</ul>")
+        block = "".join(body)
+        if group_type and str(group_type).strip() and str(group_type) not in (
+            "Basis",
+            "Base",
+            "",
+        ):
+            parts.append(
+                f'<div class="group"><div class="group-title">'
+                f"{html.escape(str(group_type))}</div>{block}</div>"
+            )
+        else:
+            parts.append(f'<div class="group">{block}</div>')
+    return "".join(parts)
+
+
+def _steps_block(steps: list[Any], *, heading: str) -> str:
+    if not steps:
+        return ""
+    parts = [f"<h2>{html.escape(heading)}</h2>", '<ol class="steps">']
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        instruction = _rich(step.get("instruction"))
+        if not instruction:
+            continue
+        parts.append(f"<li>{instruction}</li>")
+    parts.append("</ol>")
+    return "".join(parts)
+
+
+def _ingredient_line(item: dict[str, Any]) -> str:
+    qty = str(item.get("quantity") or "").strip()
+    unit = str(item.get("unit") or "").strip()
+    name = str(item.get("name") or "").strip()
+    left = " ".join(p for p in (qty, unit) if p).strip()
+    if left and name:
+        return f"{left} {name}"
+    return name or left
+
+
+def _first_url(urls: Any) -> str | None:
+    if isinstance(urls, list) and urls:
+        first = urls[0]
+        return first if isinstance(first, str) and first else None
+    return None
+
+
+def _text(value: Any) -> str:
+    return html.escape(str(value or ""))
+
+
+def _rich(value: Any) -> str:
+    """Escape text but re-allow a few FWL formatting tags."""
+    if value is None:
+        return ""
+    raw = str(value)
+    if not raw.strip():
+        return ""
+    placeholders: list[str] = []
+
+    def _keep(match: re.Match[str]) -> str:
+        placeholders.append(match.group(0))
+        return f"\x00{len(placeholders) - 1}\x00"
+
+    kept = _ALLOWED_TAG.sub(_keep, raw)
+    escaped = html.escape(_TAG.sub("", kept))
+    for idx, tag in enumerate(placeholders):
+        escaped = escaped.replace(f"\x00{idx}\x00", tag)
+    return escaped

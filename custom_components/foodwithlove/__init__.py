@@ -15,6 +15,7 @@ from .const import (
     DEFAULT_LANGUAGE,
 )
 from .coordinator import FwlDataUpdateCoordinator
+from .views import async_setup_views
 
 # Always forward all platforms so unload stays stable across public↔auth.
 # Calendar/todo skip entity creation when not authenticated.
@@ -34,6 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
+    async_setup_views(hass)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

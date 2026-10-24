@@ -43,6 +43,9 @@ def test_week_overview_matches_app_shape():
     assert tue["label"] == "Dienstag 20. Oktober"
     assert tue["meals"][0]["title"] == "Gnocchi alla Sorrentina"
     assert tue["meals"][0]["app_url"].endswith("rTi6KZH63rUZQRInqe7T")
+    assert tue["meals"][0]["viewer_url"] == (
+        "/api/foodwithlove/recipe/rTi6KZH63rUZQRInqe7T"
+    )
     sat = days[5]
     assert sat["is_today"] is True
     assert sat["empty"] is True
