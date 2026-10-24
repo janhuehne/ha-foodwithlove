@@ -18,7 +18,8 @@ Unofficial Home Assistant integration for **[food with love](https://www.foodwit
 | Week overview | Magic Link | Mon–Sun meal plan with images and smart open links |
 | Week plan calendar | Magic Link | Create / delete planned meals |
 | Remove from week plan | Magic Link | Service `foodwithlove.remove_weekplan_meal` + × on week card |
-| Favorites | Magic Link | Count + folders |
+| Add to week plan | Magic Link | Service `foodwithlove.add_weekplan_meal` + + on favorites |
+| Favorites | Magic Link | Collapsible folders with recipes (`custom:fwl-favorites-card`) |
 | Shopping list todo | Magic Link | Check off / delete syncs back to FWL |
 | Options | — | Poll interval, calendar window |
 | Diagnostics / reauth | — | Redacted diagnostics; Magic Link when the token expires |
@@ -71,12 +72,14 @@ entity: sensor.food_with_love_wochenuberblick
 type: custom:fwl-recipe-card
 entity: sensor.food_with_love_rezept_des_tages
 greeting_entity: sensor.food_with_love_morgengruss
+
+type: custom:fwl-favorites-card
+entity: sensor.food_with_love_favoriten
 ```
 
 Also useful:
 
 - `todo.food_with_love_einkaufsliste`
-- `sensor.food_with_love_favoriten`
 
 Entity IDs vary with language — check **Settings → Devices → food with love**.
 

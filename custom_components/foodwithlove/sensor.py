@@ -157,12 +157,11 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
             self._attr_native_value = favorites.get("count", 0)
             self._attr_entity_picture = None
             folders = favorites.get("folders") or []
+            uncategorized = favorites.get("uncategorized") or []
             self._attr_extra_state_attributes = {
                 ATTR_FAVORITE_COUNT: favorites.get("count", 0),
-                ATTR_FAVORITE_FOLDERS: [
-                    {"name": f.get("name"), "count": f.get("count")}
-                    for f in folders
-                ],
+                ATTR_FAVORITE_FOLDERS: folders,
+                "uncategorized": uncategorized,
                 **auth_attrs,
             }
             return

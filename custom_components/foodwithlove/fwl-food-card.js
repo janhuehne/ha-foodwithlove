@@ -7,6 +7,7 @@
   const CARD_TAG = "fwl-food-card";
   const WEEK_TAG = "fwl-week-card";
   const RECIPE_TAG = "fwl-recipe-card";
+  const FAV_TAG = "fwl-favorites-card";
 
   function preferApp() {
     const ua = navigator.userAgent || "";
@@ -324,6 +325,231 @@
     }
   }
 
+  function todayISO() {
+    const d = new Date();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${m}-${day}`;
+  }
+
+  function pickDate(title) {
+    return new Promise((resolve) => {
+      const existing = document.getElementById("fwl-date-picker");
+      if (existing) existing.remove();
+
+      const backdrop = document.createElement("div");
+      backdrop.id = "fwl-date-picker";
+      backdrop.style.cssText =
+        "position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);" +
+        "display:flex;align-items:center;justify-content:center;padding:1rem;";
+
+      const panel = document.createElement("div");
+      panel.style.cssText =
+        "background:var(--card-background-color,#fff);color:var(--primary-text-color);" +
+        "border-radius:12px;padding:1rem 1.1rem;min-width:min(320px,100%);" +
+        "box-shadow:0 12px 40px rgba(0,0,0,.35);";
+
+      const heading = document.createElement("div");
+      heading.style.cssText = "font-weight:650;margin-bottom:.75rem;";
+      heading.textContent = title || "Zum Wochenplan hinzufügen";
+
+      const input = document.createElement("input");
+      input.type = "date";
+      input.value = todayISO();
+      input.style.cssText =
+        "width:100%;font:inherit;padding:.5rem;border-radius:8px;" +
+        "border:1px solid var(--divider-color,#ccc);margin-bottom:.85rem;" +
+        "background:transparent;color:inherit;box-sizing:border-box;";
+
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;justify-content:flex-end;gap:.5rem;";
+
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Abbrechen";
+      cancel.style.cssText = buttonStyle();
+      const ok = document.createElement("button");
+      ok.type = "button";
+      ok.textContent = "Hinzufügen";
+      ok.style.cssText = buttonStyle(true);
+
+      const close = (value) => {
+        backdrop.remove();
+        resolve(value);
+      };
+      cancel.addEventListener("click", () => close(null));
+      backdrop.addEventListener("click", (ev) => {
+        if (ev.target === backdrop) close(null);
+      });
+      ok.addEventListener("click", () => close(input.value || null));
+
+      row.append(cancel, ok);
+      panel.append(heading, input, row);
+      backdrop.append(panel);
+      document.body.append(backdrop);
+      input.focus();
+    });
+  }
+
+  function favoriteRecipeRow(recipe) {
+    const title = esc(recipe.title || recipe.recipe_id || "");
+    const prep = recipe.preparation_time
+      ? ` · ${esc(recipe.preparation_time)} min`
+      : "";
+    const img = recipe.image_url
+      ? `<img src="${esc(recipe.image_url)}" alt="" width="56" style="width:56px;max-width:56px;height:auto;border-radius:8px;vertical-align:middle;margin-right:8px;" />`
+      : "";
+    const canOpen = recipe.app_url || recipe.viewer_url;
+    const open = canOpen
+      ? `<a href="#" class="fwl-open" data-app="${esc(recipe.app_url || "")}" data-viewer="${esc(recipe.viewer_url || "")}">${esc(linkLabel())}</a>`
+      : "";
+    const rid = recipe.recipe_id || "";
+    const add = rid
+      ? `<button type="button" class="fwl-add" title="Zum Wochenplan" aria-label="Zum Wochenplan" data-recipe-id="${esc(rid)}" data-title="${title}">+</button>`
+      : "";
+    return `<div class="fwl-fav-recipe" style="display:flex;align-items:center;gap:.4rem;margin:.3rem 0 .55rem;">
+      <div style="flex:1;min-width:0;">${img}<strong>${title}</strong>${prep}${open ? ` · ${open}` : ""}</div>
+      ${add}
+    </div>`;
+  }
+
+  class FwlFavoritesCard extends HTMLElement {
+    setConfig(config) {
+      this._config = config || {};
+      if (!this._config.entity) {
+        throw new Error("entity is required");
+      }
+      this._open = this._open || new Set();
+    }
+
+    set hass(hass) {
+      this._hass = hass;
+      this._render();
+    }
+
+    getCardSize() {
+      return 6;
+    }
+
+    _toggle(id) {
+      if (this._open.has(id)) this._open.delete(id);
+      else this._open.add(id);
+      this._render();
+    }
+
+    _render() {
+      if (!this._hass || !this._config) return;
+      const st = this._hass.states[this._config.entity];
+      const attrs = (st && st.attributes) || {};
+      const folders = attrs.favorite_folders || [];
+      const uncategorized = attrs.uncategorized || [];
+      const total = attrs.favorite_count || (st && st.state) || 0;
+      const sections = [];
+      if (uncategorized.length) {
+        sections.push({
+          id: "__uncategorized__",
+          name: "Ohne Ordner",
+          count: uncategorized.length,
+          recipes: uncategorized,
+        });
+      }
+      for (const f of folders) {
+        sections.push({
+          id: f.id || f.name,
+          name: f.name || "Ordner",
+          count: f.count || (f.recipes || []).length,
+          recipes: f.recipes || [],
+        });
+      }
+
+      const root = this.shadowRoot || this.attachShadow({ mode: "open" });
+      let body;
+      if (!sections.length) {
+        body = "<em>Keine Favoriten</em>";
+      } else {
+        body = sections
+          .map((sec) => {
+            const open = this._open.has(sec.id);
+            const chev = open ? "▾" : "▸";
+            const recipes = open
+              ? (sec.recipes || []).map(favoriteRecipeRow).join("")
+              : "";
+            return `<div class="fwl-folder">
+              <button type="button" class="fwl-folder-head" data-id="${esc(sec.id)}">
+                <span class="chev">${chev}</span>
+                <span class="name">${esc(sec.name)}</span>
+                <span class="count">${esc(sec.count)}</span>
+              </button>
+              ${open ? `<div class="fwl-folder-body">${recipes || "<em>Leer</em>"}</div>` : ""}
+            </div>`;
+          })
+          .join("");
+      }
+
+      root.innerHTML = `
+        <ha-card>
+          <style>
+            .pad { padding: 12px 16px 16px; }
+            .summary { opacity: .75; margin-bottom: .65rem; font-size: .95rem; }
+            .fwl-folder { border-top: 1px solid var(--divider-color, #3333); }
+            .fwl-folder:first-of-type { border-top: 0; }
+            button.fwl-folder-head {
+              appearance: none; width: 100%; display: flex; align-items: center;
+              gap: .55rem; padding: .65rem 0; border: 0; background: transparent;
+              color: inherit; font: inherit; cursor: pointer; text-align: left;
+            }
+            button.fwl-folder-head .chev { width: 1rem; opacity: .7; }
+            button.fwl-folder-head .name { flex: 1; font-weight: 650; }
+            button.fwl-folder-head .count {
+              opacity: .65; font-variant-numeric: tabular-nums;
+            }
+            .fwl-folder-body { padding: 0 0 .55rem .2rem; }
+            button.fwl-add {
+              appearance: none; border: 1px solid var(--divider-color, #ddd);
+              background: transparent; color: var(--primary-color, #03a9f4);
+              width: 1.75rem; height: 1.75rem; border-radius: 999px;
+              font-size: 1.2rem; line-height: 1; cursor: pointer; flex: 0 0 auto;
+            }
+            button.fwl-add:hover { border-color: currentColor; }
+            button.fwl-add:disabled { opacity: .4; cursor: wait; }
+          </style>
+          <div class="pad">
+            ${this._config.title ? `<h2 style="margin:0 0 .35rem;font-size:1.1rem;">${esc(this._config.title)}</h2>` : ""}
+            <div class="summary">${esc(total)} Favoriten</div>
+            ${body}
+          </div>
+        </ha-card>`;
+
+      root.querySelectorAll("button.fwl-folder-head").forEach((btn) => {
+        btn.addEventListener("click", () => this._toggle(btn.getAttribute("data-id")));
+      });
+      bindOpens(root, this._hass);
+      root.querySelectorAll("button.fwl-add").forEach((btn) => {
+        btn.addEventListener("click", async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const recipeId = btn.getAttribute("data-recipe-id") || "";
+          const recipeTitle = btn.getAttribute("data-title") || "Rezept";
+          const day = await pickDate(`„${recipeTitle}“ planen`);
+          if (!day || !recipeId) return;
+          btn.disabled = true;
+          try {
+            await this._hass.callService("foodwithlove", "add_weekplan_meal", {
+              date: day,
+              recipe_id: recipeId,
+            });
+          } catch (err) {
+            console.error("fwl add weekplan meal failed", err);
+            window.alert("Konnte nicht zum Wochenplan hinzufügen.");
+            btn.disabled = false;
+            return;
+          }
+          btn.disabled = false;
+        });
+      });
+    }
+  }
+
   /** Combined card used by the Food dashboard (week + recipe of the day). */
   class FwlFoodCard extends HTMLElement {
     setConfig(config) {
@@ -376,6 +602,9 @@
   if (!customElements.get(RECIPE_TAG)) {
     customElements.define(RECIPE_TAG, FwlRecipeCard);
   }
+  if (!customElements.get(FAV_TAG)) {
+    customElements.define(FAV_TAG, FwlFavoritesCard);
+  }
   if (!customElements.get(CARD_TAG)) {
     customElements.define(CARD_TAG, FwlFoodCard);
   }
@@ -391,6 +620,11 @@
       type: "fwl-recipe-card",
       name: "food with love recipe",
       description: "Recipe of the day with device-aware open action",
+    },
+    {
+      type: "fwl-favorites-card",
+      name: "food with love favorites",
+      description: "Collapsible favorite folders with add-to-weekplan",
     },
     {
       type: "fwl-food-card",

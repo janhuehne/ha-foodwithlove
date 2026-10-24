@@ -26,3 +26,32 @@ remove_weekplan_meal:
       default: false
       selector:
         boolean:
+
+add_weekplan_meal:
+  name: Add week plan meal
+  description: Add a catalog recipe or custom entry to the food with love week plan for a given day.
+  fields:
+    date:
+      name: Date
+      description: Calendar day of the meal (YYYY-MM-DD).
+      required: true
+      example: "2026-10-25"
+      selector:
+        date:
+    recipe_id:
+      name: Recipe ID
+      description: Catalog recipe id (required for normal recipes).
+      example: rTi6KZH63rUZQRInqe7T
+      selector:
+        text:
+    title:
+      name: Custom title
+      description: Title of a custom weekplan entry (when custom is true).
+      selector:
+        text:
+    custom:
+      name: Custom entry
+      description: Set true for free-text custom meals (not catalog recipes).
+      default: false
+      selector:
+        boolean:

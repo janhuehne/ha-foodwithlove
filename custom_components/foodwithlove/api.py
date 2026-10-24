@@ -872,7 +872,7 @@ class FwlApiClient:
     # --- Favorites & notes -------------------------------------------------
 
     async def get_favorites(self) -> dict[str, Any]:
-        """Return favorite recipe IDs and folders."""
+        """Return favorite recipe IDs and folders (with titles/images)."""
         await self._require_auth()
         user_doc = await self._firestore_get()
         favorites_map: dict[str, bool] = {}
@@ -885,7 +885,8 @@ class FwlApiClient:
                         k: bool(v) for k, v in decoded.items() if v is True
                     }
 
-        folders: list[dict[str, Any]] = []
+        folders_raw: list[dict[str, Any]] = []
+        folder_ids: set[str] = set()
         for doc in await self._firestore_list("favoriteFolder"):
             folder_id = (doc.get("name") or "").rsplit("/", 1)[-1]
             fields = {
@@ -897,19 +898,55 @@ class FwlApiClient:
                 if isinstance(recipes, dict)
                 else []
             )
-            folders.append(
+            folder_ids.update(active)
+            folders_raw.append(
                 {
                     "id": folder_id,
                     "name": fields.get("name") or folder_id,
                     "recipe_ids": active,
-                    "count": len(active),
+                }
+            )
+
+        all_ids = list(dict.fromkeys([*favorites_map.keys(), *folder_ids]))
+        titles = await self.resolve_recipe_titles(all_ids)
+        details = await self._recipe_details_map(all_ids)
+
+        def _recipe_card(rid: str) -> dict[str, Any]:
+            info = details.get(rid) or {}
+            return {
+                "recipe_id": rid,
+                "title": titles.get(rid) or rid,
+                "image_url": info.get("thumb_url") or info.get("image_url"),
+                "app_url": APP_RECIPE_URL.format(recipe_id=rid),
+                "viewer_url": f"/api/foodwithlove/recipe/{rid}",
+                "preparation_time": info.get("preparation_time"),
+            }
+
+        folders: list[dict[str, Any]] = []
+        for folder in folders_raw:
+            recipes = [_recipe_card(rid) for rid in folder["recipe_ids"]]
+            recipes.sort(key=lambda r: (r.get("title") or "").lower())
+            folders.append(
+                {
+                    "id": folder["id"],
+                    "name": folder["name"],
+                    "count": len(recipes),
+                    "recipes": recipes,
                 }
             )
         folders.sort(key=lambda f: f["name"])
+
+        uncategorized_ids = [
+            rid for rid in favorites_map if rid not in folder_ids
+        ]
+        uncategorized = [_recipe_card(rid) for rid in uncategorized_ids]
+        uncategorized.sort(key=lambda r: (r.get("title") or "").lower())
+
         return {
             "recipe_ids": sorted(favorites_map.keys()),
             "count": len(favorites_map),
             "folders": folders,
+            "uncategorized": uncategorized,
         }
 
     async def get_note(self, recipe_id: str) -> str | None:
