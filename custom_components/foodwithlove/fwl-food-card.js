@@ -273,17 +273,34 @@
     </button>`;
   }
 
-  function sourceBadge(source) {
+  function sourceBadge(source, count) {
+    let label = "";
+    let cls = "";
     if (source === "cookidoo") {
-      return `<span class="fwl-src cookidoo" title="Cookidoo">Cookidoo</span>`;
+      label = "Cookidoo";
+      cls = "cookidoo";
+    } else if (source === "chefkoch") {
+      label = "Chefkoch";
+      cls = "chefkoch";
+    } else if (source === "fwl") {
+      label = "FWL";
+      cls = "fwl";
+    } else {
+      return "";
     }
-    if (source === "chefkoch") {
-      return `<span class="fwl-src chefkoch" title="Chefkoch">Chefkoch</span>`;
-    }
-    if (source === "fwl") {
-      return `<span class="fwl-src fwl" title="food with love">FWL</span>`;
-    }
-    return "";
+    const suffix =
+      count != null && count !== "" ? ` ${esc(String(count))}` : "";
+    return `<span class="fwl-src ${cls}" title="${esc(label)}">${esc(label)}${suffix}</span>`;
+  }
+
+  function sectionSourceChips(sec) {
+    const bits = [];
+    if (sec.fwlCount) bits.push(sourceBadge("fwl", sec.fwlCount));
+    if (sec.cookCount) bits.push(sourceBadge("cookidoo", sec.cookCount));
+    if (sec.chefCount) bits.push(sourceBadge("chefkoch", sec.chefCount));
+    return bits.length
+      ? `<span class="fwl-src-row">${bits.join("")}</span>`
+      : "";
   }
 
   function metaLine(meal) {
@@ -636,6 +653,10 @@
       .fwl-src.fwl { background: #e8f5e9; color: #2e7d32; }
       .fwl-src.cookidoo { background: #e3f2fd; color: #1565c0; }
       .fwl-src.chefkoch { background: #fff3e0; color: #ef6c00; }
+      .fwl-src-row {
+        display: inline-flex; flex-wrap: wrap; gap: .25rem; align-items: center;
+        margin-left: .35rem;
+      }
       button.fwl-icon-btn {
         appearance: none; border: 1px solid var(--divider-color, #ddd);
         background: transparent; color: var(--primary-color, #03a9f4);
@@ -1022,8 +1043,21 @@
       return (recipes || []).map((r) => ({ ...r, source: r.source || source }));
     }
 
-    _mergeFavoriteSections(folders, uncategorized, partners) {
+    _mergeFavoriteSections(folders, uncategorized, partners, primarySource) {
       const byKey = new Map();
+      const primary = primarySource || "fwl";
+      const primaryCountKey =
+        primary === "cookidoo"
+          ? "cookCount"
+          : primary === "chefkoch"
+            ? "chefCount"
+            : "fwlCount";
+      const primaryIdKey =
+        primary === "cookidoo"
+          ? "cookFolderId"
+          : primary === "chefkoch"
+            ? "chefFolderId"
+            : "fwlFolderId";
 
       const ensure = (name) => {
         const key = folderMergeKey(name);
@@ -1066,20 +1100,20 @@
 
       if (uncategorized.length) {
         const sec = ensureUncategorized();
-        sec.recipes.push(...this._tagRecipes(uncategorized, "fwl"));
-        sec.fwlCount = uncategorized.length;
+        sec.recipes.push(...this._tagRecipes(uncategorized, primary));
+        sec[primaryCountKey] = uncategorized.length;
       }
 
       for (const f of folders) {
         const sec = ensure(f.name || "Ordner");
-        if (f.id) sec.fwlFolderId = f.id;
+        if (f.id) sec[primaryIdKey] = f.id;
         sec.name = folderDisplayName(folderMergeKey(f.name), f.name);
-        const tagged = this._tagRecipes(f.recipes || [], "fwl").map((r) => ({
+        const tagged = this._tagRecipes(f.recipes || [], primary).map((r) => ({
           ...r,
           folder_id: f.id || r.folder_id || null,
         }));
         sec.recipes.push(...tagged);
-        sec.fwlCount = tagged.length;
+        sec[primaryCountKey] = tagged.length;
       }
 
       for (const partner of partners || []) {
@@ -1158,11 +1192,23 @@
       const attrs = (st && st.attributes) || {};
       const folders = attrs.favorite_folders || [];
       const uncategorized = attrs.uncategorized || [];
+      // Prefer sensor-declared source so a Chefkoch/Cookidoo primary entity
+      // is not mis-tagged as FWL (which hid the Chefkoch badge).
+      const primarySource =
+        attrs.source === "chefkoch" || attrs.source === "cookidoo"
+          ? attrs.source
+          : "fwl";
       let total = Number(attrs.favorite_count || (st && st.state) || 0) || 0;
       const cookEnt = this._config.cookidoo_entity || "";
       const chefEnt = this._config.chefkoch_entity || "";
       const partners = [];
-      const labels = ["FWL"];
+      const labels = [
+        primarySource === "chefkoch"
+          ? "Chefkoch"
+          : primarySource === "cookidoo"
+            ? "Cookidoo"
+            : "FWL",
+      ];
       let cookFolders = [];
       let chefFolders = [];
       let chefCanPlan = true;
@@ -1178,7 +1224,7 @@
           uncategorized: cookAttrs.uncategorized || [],
           entity: cookEnt,
         });
-        labels.push("Cookidoo");
+        if (!labels.includes("Cookidoo")) labels.push("Cookidoo");
       }
       if (chefEnt && partnerEntityAvailable(this._hass, chefEnt)) {
         const chefSt = this._hass.states[chefEnt];
@@ -1193,13 +1239,14 @@
           uncategorized: chefAttrs.uncategorized || [],
           entity: chefEnt,
         });
-        labels.push("Chefkoch");
+        if (!labels.includes("Chefkoch")) labels.push("Chefkoch");
       }
       const joined = partners.length > 0;
       const sections = this._mergeFavoriteSections(
         folders,
         uncategorized,
-        partners
+        partners,
+        primarySource
       );
 
       const root = this.shadowRoot || this.attachShadow({ mode: "open" });
@@ -1249,6 +1296,7 @@
                   <span class="chev">${chev}</span>
                   <span class="name">${esc(sec.name)}</span>
                   <span class="count">${esc(sec.count)}</span>
+                  ${sectionSourceChips(sec)}
                 </button>
                 ${del}
               </div>
