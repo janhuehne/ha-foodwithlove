@@ -4,7 +4,7 @@
  * Desktop: open HA recipe viewer in an overlay (fallback: new tab).
  */
 (() => {
-  const CARD_VERSION = "0.5.20";
+  const CARD_VERSION = "0.5.21";
   const CARD_TAG = "fwl-food-card";
   const WEEK_TAG = "fwl-week-card";
   const RECIPE_TAG = "fwl-recipe-card";
@@ -356,14 +356,21 @@
       : "";
   }
 
+  function mealThumb(meal, imgSize) {
+    const size = imgSize || 72;
+    const imgUrl = safeHttpsUrl(meal && meal.image_url);
+    if (imgUrl) {
+      return `<img src="${esc(imgUrl)}" alt="" width="${size}" height="${size}" style="width:${size}px;max-width:${size}px;height:${size}px;object-fit:cover;border-radius:8px;flex:0 0 auto;" />`;
+    }
+    // Keep the same footprint as Cookidoo/FWL thumbs when a partner recipe
+    // has no real photo (e.g. Chefkoch private recipes without images).
+    return `<span class="fwl-thumb-empty" style="width:${size}px;height:${size}px;flex:0 0 auto;border-radius:8px;" aria-hidden="true"></span>`;
+  }
+
   function mealMain(meal, imgSize) {
     const title = esc(meal.title || "");
     const prep = metaLine(meal);
-    const size = imgSize || 72;
-    const imgUrl = safeHttpsUrl(meal.image_url);
-    const img = imgUrl
-      ? `<img src="${esc(imgUrl)}" alt="" width="${size}" style="width:${size}px;max-width:${size}px;height:auto;border-radius:8px;flex:0 0 auto;" />`
-      : "";
+    const img = mealThumb(meal, imgSize);
     const text = `<div class="fwl-text"><strong>${title}</strong>${prep}</div>`;
     const canOpen = meal.app_url || meal.viewer_url;
     if (!canOpen) {
@@ -682,6 +689,11 @@
       }
       button.fwl-main:hover strong { text-decoration: underline; }
       .fwl-main { display: flex; align-items: center; gap: .55rem; flex: 1; min-width: 0; }
+      .fwl-thumb-empty {
+        display: inline-block; box-sizing: border-box;
+        background: color-mix(in srgb, var(--secondary-text-color, #888) 18%, transparent);
+        border: 1px solid var(--divider-color, #3333);
+      }
       .fwl-text { min-width: 0; line-height: 1.3; }
       .fwl-text strong { display: block; }
       .fwl-prep {
