@@ -502,14 +502,25 @@
       const last = days[days.length - 1].date;
       if (!start || !last) return;
 
-      const cookEnt = this._config.cookidoo_entity || "";
-      const chefEnt = this._config.chefkoch_entity || "";
+      const primaryEntity = this._config.entity || "";
+      const cookEnt = findCollectionsEntity(
+        this._hass,
+        "cookidoo",
+        this._config.cookidoo_entity || "",
+        primaryEntity
+      );
+      const chefEnt = findCollectionsEntity(
+        this._hass,
+        "chefkoch",
+        this._config.chefkoch_entity || "",
+        primaryEntity
+      );
       const cookSt = cookEnt ? this._hass.states[cookEnt] : null;
       const chefSt = chefEnt ? this._hass.states[chefEnt] : null;
       const cookSensor = this._weekMealsFromEntity(cookEnt);
       const chefSensor = this._weekMealsFromEntity(chefEnt);
       const cal = this._config.cookidoo_calendar || "";
-      // Prefer cookidoo_entity sensor when present; otherwise calendar can fill Cookidoo.
+      // Prefer cookidoo collections sensor when present; otherwise calendar can fill Cookidoo.
       const needCal = Boolean(cal) && cookSensor === null;
 
       const key = [
@@ -1015,6 +1026,54 @@
     return st.state !== "unavailable" && st.state !== "unknown";
   }
 
+  /**
+   * Resolve cookidoo/chefkoch collections sensors.
+   * Prefer explicit config, otherwise auto-discover by attributes.source
+   * (or entity_id pattern) so join works without YAML edits.
+   */
+  function findCollectionsEntity(hass, source, configuredId, excludeId) {
+    if (configuredId && partnerEntityAvailable(hass, configuredId)) {
+      return configuredId;
+    }
+    if (!hass || !hass.states) return "";
+    const needle =
+      source === "chefkoch"
+        ? "chefkoch_collections"
+        : source === "cookidoo"
+          ? "cookidoo_collections"
+          : "";
+    let byPattern = "";
+    for (const entityId of Object.keys(hass.states)) {
+      if (entityId === excludeId || entityId === configuredId) continue;
+      if (!entityId.startsWith("sensor.")) continue;
+      const st = hass.states[entityId];
+      if (!st || st.state === "unavailable" || st.state === "unknown") continue;
+      const attrs = st.attributes || {};
+      const hasFolders = Array.isArray(attrs.favorite_folders);
+      if (!hasFolders) continue;
+      if (attrs.source === source) return entityId;
+      if (
+        !byPattern &&
+        needle &&
+        entityId.includes(needle)
+      ) {
+        byPattern = entityId;
+      }
+    }
+    return byPattern;
+  }
+
+  function partnerFolderStats(folders, uncategorized) {
+    const folderCount = (folders || []).length;
+    const recipeCount =
+      (uncategorized || []).length +
+      (folders || []).reduce(
+        (sum, f) => sum + ((f.recipes && f.recipes.length) || Number(f.count) || 0),
+        0
+      );
+    return { folderCount, recipeCount };
+  }
+
   class FwlFavoritesCard extends HTMLElement {
     setConfig(config) {
       this._config = config || {};
@@ -1199,8 +1258,19 @@
           ? attrs.source
           : "fwl";
       let total = Number(attrs.favorite_count || (st && st.state) || 0) || 0;
-      const cookEnt = this._config.cookidoo_entity || "";
-      const chefEnt = this._config.chefkoch_entity || "";
+      const primaryEntity = this._config.entity || "";
+      const cookEnt = findCollectionsEntity(
+        this._hass,
+        "cookidoo",
+        this._config.cookidoo_entity || "",
+        primaryEntity
+      );
+      const chefEnt = findCollectionsEntity(
+        this._hass,
+        "chefkoch",
+        this._config.chefkoch_entity || "",
+        primaryEntity
+      );
       const partners = [];
       const labels = [
         primarySource === "chefkoch"
@@ -1209,37 +1279,56 @@
             ? "Cookidoo"
             : "FWL",
       ];
+      const joinNotes = [];
       let cookFolders = [];
       let chefFolders = [];
       let chefCanPlan = true;
-      if (cookEnt && partnerEntityAvailable(this._hass, cookEnt)) {
+      if (cookEnt) {
         const cookSt = this._hass.states[cookEnt];
         const cookAttrs = (cookSt && cookSt.attributes) || {};
         cookFolders = cookAttrs.favorite_folders || [];
+        const cookUnc = cookAttrs.uncategorized || [];
         total +=
           Number(cookAttrs.favorite_count || (cookSt && cookSt.state) || 0) || 0;
         partners.push({
           source: "cookidoo",
           folders: cookFolders,
-          uncategorized: cookAttrs.uncategorized || [],
+          uncategorized: cookUnc,
           entity: cookEnt,
         });
         if (!labels.includes("Cookidoo")) labels.push("Cookidoo");
+        const stats = partnerFolderStats(cookFolders, cookUnc);
+        joinNotes.push(
+          `Cookidoo ← ${cookEnt} (${stats.folderCount} Ordner, ${stats.recipeCount} Rezepte)`
+        );
       }
-      if (chefEnt && partnerEntityAvailable(this._hass, chefEnt)) {
+      if (chefEnt) {
         const chefSt = this._hass.states[chefEnt];
         const chefAttrs = (chefSt && chefSt.attributes) || {};
         chefFolders = chefAttrs.favorite_folders || [];
+        const chefUnc = chefAttrs.uncategorized || [];
         chefCanPlan = !!chefAttrs.has_meal_planner;
         total +=
           Number(chefAttrs.favorite_count || (chefSt && chefSt.state) || 0) || 0;
         partners.push({
           source: "chefkoch",
           folders: chefFolders,
-          uncategorized: chefAttrs.uncategorized || [],
+          uncategorized: chefUnc,
           entity: chefEnt,
         });
         if (!labels.includes("Chefkoch")) labels.push("Chefkoch");
+        const stats = partnerFolderStats(chefFolders, chefUnc);
+        joinNotes.push(
+          `Chefkoch ← ${chefEnt} (${stats.folderCount} Ordner, ${stats.recipeCount} Rezepte)`
+        );
+      } else if (this._config.chefkoch_entity) {
+        joinNotes.push(
+          `Chefkoch: ${this._config.chefkoch_entity} nicht verfügbar`
+        );
+      } else {
+        joinNotes.push(
+          "Chefkoch: kein Collections-Sensor gefunden (Integration installieren/aktualisieren)"
+        );
       }
       const joined = partners.length > 0;
       const sections = this._mergeFavoriteSections(
@@ -1248,6 +1337,14 @@
         partners,
         primarySource
       );
+
+      // Auto-open folders that contain Chefkoch recipes once, so they are visible.
+      if (!this._autoOpenedChef && chefEnt) {
+        this._autoOpenedChef = true;
+        for (const sec of sections) {
+          if (sec.chefCount > 0) this._open.add(sec.id);
+        }
+      }
 
       const root = this.shadowRoot || this.attachShadow({ mode: "open" });
       let body;
@@ -1309,7 +1406,9 @@
       const summary = joined
         ? `${esc(total)} Favoriten (${esc(labels.join(" + "))})`
         : `${esc(total)} Favoriten`;
-
+      const joinStatus = joinNotes
+        .map((n) => `<div class="join-status">${esc(n)}</div>`)
+        .join("");
       root.innerHTML = `
         <ha-card>
           <style>${sharedRowStyles()}
@@ -1319,6 +1418,10 @@
               gap: .75rem; margin-bottom: .65rem;
             }
             .summary { opacity: .75; font-size: .95rem; }
+            .join-status {
+              opacity: .7; font-size: .8rem; margin: -.35rem 0 .65rem;
+              font-family: var(--code-font-family, monospace);
+            }
             button.fwl-new-folder {
               appearance: none; border: 1px solid var(--divider-color, #ddd);
               background: transparent; color: var(--primary-color, #03a9f4);
@@ -1363,6 +1466,7 @@
               <div class="summary">${summary}</div>
               <button type="button" class="fwl-new-folder">+ Ordner</button>
             </div>
+            ${joinStatus}
             ${body}
           </div>
         </ha-card>`;
