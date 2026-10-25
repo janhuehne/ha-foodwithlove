@@ -20,7 +20,7 @@
   const VIEWER_PATH_RE = /^\/api\/foodwithlove\/recipe\/[A-Za-z0-9_%-]+$/;
   const APP_HOST = "www.foodwithlove.de";
   const IMAGE_HOST_RE =
-    /^(?:storage\.googleapis\.com|(?:[\w-]+\.)?googleapis\.com|www\.foodwithlove\.de|foodwithlove\.de|food-with-love-app\.web\.app|food-with-love-app\.firebaseapp\.com|assets\.tmecosys\.com|(?:[\w-]+\.)?tmecosys\.com)$/i;
+    /^(?:storage\.googleapis\.com|(?:[\w-]+\.)?googleapis\.com|www\.foodwithlove\.de|foodwithlove\.de|food-with-love-app\.web\.app|food-with-love-app\.firebaseapp\.com|assets\.tmecosys\.com|(?:[\w-]+\.)?tmecosys\.com|(?:[\w-]+\.)?chefkoch-cdn\.de)$/i;
 
   function normalizeViewerPath(viewerUrl) {
     if (!viewerUrl) return null;
@@ -50,6 +50,7 @@
 
   const COOKIDOO_HOST_RE =
     /^cookidoo\.(?:de|at|ch|com|co\.uk|international|fr|it|es|nl|pl|pt|be)$/i;
+  const CHEFKOCH_HOST_RE = /^(?:www\.)?chefkoch\.de$/i;
 
   /** Allowlisted Cookidoo recipe deep links (joined favorites). */
   function safeCookidooUrl(url) {
@@ -63,6 +64,26 @@
     } catch (_err) {
       return null;
     }
+  }
+
+  /** Allowlisted Chefkoch recipe deep links (joined favorites). */
+  function safeChefkochUrl(url) {
+    if (!url) return null;
+    try {
+      const u = new URL(String(url));
+      if (u.protocol !== "https:") return null;
+      if (!CHEFKOCH_HOST_RE.test(u.hostname)) return null;
+      if (!/^\/rezepte\//i.test(u.pathname)) return null;
+      return u.toString();
+    } catch (_err) {
+      return null;
+    }
+  }
+
+  function collectionsDomain(source) {
+    if (source === "cookidoo") return "cookidoo_collections";
+    if (source === "chefkoch") return "chefkoch_collections";
+    return "foodwithlove";
   }
 
   async function fetchRecipeHtml(hass, viewerUrl) {
@@ -86,6 +107,11 @@
     const safeCookidoo = safeCookidooUrl(appUrl);
     if (safeCookidoo) {
       window.open(safeCookidoo, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const safeChefkoch = safeChefkochUrl(appUrl);
+    if (safeChefkoch) {
+      window.open(safeChefkoch, "_blank", "noopener,noreferrer");
       return;
     }
     const safeApp = safeAppUrl(appUrl);
@@ -251,6 +277,9 @@
     if (source === "cookidoo") {
       return `<span class="fwl-src cookidoo" title="Cookidoo">Cookidoo</span>`;
     }
+    if (source === "chefkoch") {
+      return `<span class="fwl-src chefkoch" title="Chefkoch">Chefkoch</span>`;
+    }
     if (source === "fwl") {
       return `<span class="fwl-src fwl" title="food with love">FWL</span>`;
     }
@@ -337,7 +366,7 @@
         const date = btn.getAttribute("data-date") || "";
         const source = btn.getAttribute("data-source") || "fwl";
         const data = { date };
-        if (source === "cookidoo") {
+        if (source === "cookidoo" || source === "chefkoch") {
           data.recipe_id = key;
         } else {
           data.custom = custom;
@@ -346,8 +375,7 @@
         }
         btn.disabled = true;
         try {
-          const domain =
-            source === "cookidoo" ? "cookidoo_collections" : "foodwithlove";
+          const domain = collectionsDomain(source);
           await hass.callService(domain, "remove_weekplan_meal", data);
         } catch (err) {
           console.error("remove weekplan meal failed", err);
@@ -364,14 +392,14 @@
       if (!this._config.entity) {
         throw new Error("entity is required");
       }
-      this._cookByDay = this._cookByDay || {};
-      this._cookKey = this._cookKey || "";
+      this._partnerByDay = this._partnerByDay || {};
+      this._partnerKey = this._partnerKey || "";
       this._cookLoading = false;
     }
 
     set hass(hass) {
       this._hass = hass;
-      this._loadCookidooEvents().finally(() => this._render());
+      this._loadPartnerMeals().finally(() => this._render());
     }
 
     getCardSize() {
@@ -383,18 +411,26 @@
       return (st && st.attributes && st.attributes.days) || [];
     }
 
-    _cookidooFromSensor() {
-      const ent = this._config.cookidoo_entity;
-      if (!ent || !this._hass) return null;
-      const st = this._hass.states[ent];
+    _weekMealsFromEntity(entityId) {
+      if (!entityId || !this._hass) return null;
+      const st = this._hass.states[entityId];
       const meals = (st && st.attributes && st.attributes.week_meals) || null;
       return Array.isArray(meals) ? meals : null;
     }
 
-    async _loadCookidooEvents() {
+    _pushPartnerMeals(byDay, meals, source, start, last) {
+      for (const meal of meals || []) {
+        const day = meal.date || "";
+        if (!day || day < start || day > last) continue;
+        if (!byDay[day]) byDay[day] = [];
+        byDay[day].push({ ...meal, source: meal.source || source });
+      }
+    }
+
+    async _loadPartnerMeals() {
       if (!this._hass) {
-        this._cookByDay = {};
-        this._cookKey = "";
+        this._partnerByDay = {};
+        this._partnerKey = "";
         return;
       }
       const days = this._fwlDays();
@@ -403,27 +439,38 @@
       const last = days[days.length - 1].date;
       if (!start || !last) return;
 
-      // Prefer cookidoo_collections sensor (includes thumbnails).
-      const sensorMeals = this._cookidooFromSensor();
-      if (sensorMeals) {
-        const key = `sensor|${this._config.cookidoo_entity}|${start}|${last}|${sensorMeals.length}`;
-        if (key === this._cookKey) return;
+      const cookEnt = this._config.cookidoo_entity || "";
+      const chefEnt = this._config.chefkoch_entity || "";
+      const cookSensor = this._weekMealsFromEntity(cookEnt);
+      const chefSensor = this._weekMealsFromEntity(chefEnt);
+      const cal = this._config.cookidoo_calendar || "";
+
+      if (cookSensor || chefSensor) {
+        const key = [
+          "sensor",
+          cookEnt,
+          chefEnt,
+          start,
+          last,
+          cookSensor ? cookSensor.length : 0,
+          chefSensor ? chefSensor.length : 0,
+        ].join("|");
+        if (key === this._partnerKey) return;
         const byDay = {};
-        for (const meal of sensorMeals) {
-          const day = meal.date || "";
-          if (!day || day < start || day > last) continue;
-          if (!byDay[day]) byDay[day] = [];
-          byDay[day].push({ ...meal, source: "cookidoo" });
+        if (cookSensor) {
+          this._pushPartnerMeals(byDay, cookSensor, "cookidoo", start, last);
         }
-        this._cookByDay = byDay;
-        this._cookKey = key;
+        if (chefSensor) {
+          this._pushPartnerMeals(byDay, chefSensor, "chefkoch", start, last);
+        }
+        this._partnerByDay = byDay;
+        this._partnerKey = key;
         return;
       }
 
-      const cal = this._config.cookidoo_calendar;
       if (!cal) {
-        this._cookByDay = {};
-        this._cookKey = "";
+        this._partnerByDay = {};
+        this._partnerKey = "";
         return;
       }
       // Calendar end is exclusive — advance one day.
@@ -431,7 +478,7 @@
       endDate.setDate(endDate.getDate() + 1);
       const end = endDate.toISOString().slice(0, 10);
       const key = `${cal}|${start}|${end}`;
-      if (key === this._cookKey || this._cookLoading) return;
+      if (key === this._partnerKey || this._cookLoading) return;
       this._cookLoading = true;
       try {
         const events = await this._hass.callApi(
@@ -463,12 +510,12 @@
             image_url: null,
           });
         }
-        this._cookByDay = byDay;
-        this._cookKey = key;
+        this._partnerByDay = byDay;
+        this._partnerKey = key;
       } catch (err) {
         console.error("fwl cookidoo calendar fetch failed", err);
-        this._cookByDay = {};
-        this._cookKey = "";
+        this._partnerByDay = {};
+        this._partnerKey = "";
       } finally {
         this._cookLoading = false;
       }
@@ -476,15 +523,15 @@
 
     _mergedDays() {
       const days = this._fwlDays();
-      const cook = this._cookByDay || {};
+      const partners = this._partnerByDay || {};
       return days.map((d) => {
         const fwlMeals = (d.meals || []).map((m) => ({
           ...m,
           source: m.source || "fwl",
           date: m.date || d.date,
         }));
-        const cookMeals = cook[d.date] || [];
-        const meals = [...fwlMeals, ...cookMeals];
+        const partnerMeals = partners[d.date] || [];
+        const meals = [...fwlMeals, ...partnerMeals];
         meals.sort((a, b) =>
           String(a.title || "").localeCompare(String(b.title || ""), "de", {
             sensitivity: "base",
@@ -571,6 +618,7 @@
       }
       .fwl-src.fwl { background: #e8f5e9; color: #2e7d32; }
       .fwl-src.cookidoo { background: #e3f2fd; color: #1565c0; }
+      .fwl-src.chefkoch { background: #fff3e0; color: #ef6c00; }
       button.fwl-icon-btn {
         appearance: none; border: 1px solid var(--divider-color, #ddd);
         background: transparent; color: var(--primary-color, #03a9f4);
@@ -944,7 +992,7 @@
       return (recipes || []).map((r) => ({ ...r, source: r.source || source }));
     }
 
-    _mergeFavoriteSections(folders, uncategorized, cookFolders, joined) {
+    _mergeFavoriteSections(folders, uncategorized, partners) {
       const byKey = new Map();
 
       const ensure = (name) => {
@@ -957,8 +1005,10 @@
             recipes: [],
             fwlFolderId: null,
             cookFolderId: null,
+            chefFolderId: null,
             fwlCount: 0,
             cookCount: 0,
+            chefCount: 0,
           };
           byKey.set(key, sec);
         }
@@ -972,8 +1022,10 @@
           recipes: this._tagRecipes(uncategorized, "fwl"),
           fwlFolderId: null,
           cookFolderId: null,
+          chefFolderId: null,
           fwlCount: uncategorized.length,
           cookCount: 0,
+          chefCount: 0,
         };
         byKey.set(sec.id, sec);
       }
@@ -990,21 +1042,33 @@
         sec.fwlCount = tagged.length;
       }
 
-      if (joined) {
-        for (const f of cookFolders) {
+      for (const partner of partners || []) {
+        const source = partner.source;
+        const idKey =
+          source === "cookidoo"
+            ? "cookFolderId"
+            : source === "chefkoch"
+              ? "chefFolderId"
+              : null;
+        const countKey =
+          source === "cookidoo"
+            ? "cookCount"
+            : source === "chefkoch"
+              ? "chefCount"
+              : null;
+        if (!idKey) continue;
+        for (const f of partner.folders || []) {
           const sec = ensure(f.name || "Ordner");
-          if (f.id) sec.cookFolderId = f.id;
+          if (f.id) sec[idKey] = f.id;
           if (!sec.fwlFolderId) {
             sec.name = folderDisplayName(folderMergeKey(f.name), f.name);
           }
-          const tagged = this._tagRecipes(f.recipes || [], "cookidoo").map(
-            (r) => ({
-              ...r,
-              folder_id: f.id || r.folder_id || null,
-            })
-          );
+          const tagged = this._tagRecipes(f.recipes || [], source).map((r) => ({
+            ...r,
+            folder_id: f.id || r.folder_id || null,
+          }));
           sec.recipes.push(...tagged);
-          sec.cookCount = tagged.length;
+          sec[countKey] = tagged.length;
         }
       }
 
@@ -1017,11 +1081,16 @@
         sec.count = sec.recipes.length;
         sec.deletable =
           (!!sec.fwlFolderId && sec.fwlCount === 0) ||
-          (!!sec.cookFolderId && sec.cookCount === 0);
+          (!!sec.cookFolderId && sec.cookCount === 0) ||
+          (!!sec.chefFolderId && sec.chefCount === 0);
         if (sec.id !== "__uncategorized__") {
           sec.id =
             sec.fwlFolderId ||
-            (sec.cookFolderId ? `cook:${sec.cookFolderId}` : `merged:${sec.id}`);
+            (sec.cookFolderId
+              ? `cook:${sec.cookFolderId}`
+              : sec.chefFolderId
+                ? `chef:${sec.chefFolderId}`
+                : `merged:${sec.id}`);
         }
         return sec;
       });
@@ -1043,21 +1112,35 @@
       const folders = attrs.favorite_folders || [];
       const uncategorized = attrs.uncategorized || [];
       let total = Number(attrs.favorite_count || (st && st.state) || 0) || 0;
-      const joined = !!this._config.cookidoo_entity;
-      const cookSt = joined
-        ? this._hass.states[this._config.cookidoo_entity]
-        : null;
-      const cookAttrs = (cookSt && cookSt.attributes) || {};
-      const cookFolders = cookAttrs.favorite_folders || [];
-      if (joined) {
+      const cookEnt = this._config.cookidoo_entity || "";
+      const chefEnt = this._config.chefkoch_entity || "";
+      const partners = [];
+      const labels = ["FWL"];
+      let cookFolders = [];
+      let chefFolders = [];
+      if (cookEnt) {
+        const cookSt = this._hass.states[cookEnt];
+        const cookAttrs = (cookSt && cookSt.attributes) || {};
+        cookFolders = cookAttrs.favorite_folders || [];
         total +=
           Number(cookAttrs.favorite_count || (cookSt && cookSt.state) || 0) || 0;
+        partners.push({ source: "cookidoo", folders: cookFolders });
+        labels.push("Cookidoo");
       }
+      if (chefEnt) {
+        const chefSt = this._hass.states[chefEnt];
+        const chefAttrs = (chefSt && chefSt.attributes) || {};
+        chefFolders = chefAttrs.favorite_folders || [];
+        total +=
+          Number(chefAttrs.favorite_count || (chefSt && chefSt.state) || 0) || 0;
+        partners.push({ source: "chefkoch", folders: chefFolders });
+        labels.push("Chefkoch");
+      }
+      const joined = partners.length > 0;
       const sections = this._mergeFavoriteSections(
         folders,
         uncategorized,
-        cookFolders,
-        joined
+        partners
       );
 
       const root = this.shadowRoot || this.attachShadow({ mode: "open" });
@@ -1071,14 +1154,19 @@
             const chev = open ? "▾" : "▸";
             const recipes = open
               ? (sec.recipes || [])
-                  .map((r) =>
-                    favoriteRecipeRow(
-                      r,
-                      r.source === "cookidoo"
-                        ? r.folder_id || sec.cookFolderId || ""
-                        : r.folder_id || sec.fwlFolderId || ""
-                    )
-                  )
+                  .map((r) => {
+                    let folderForSource = r.folder_id || "";
+                    if (!folderForSource) {
+                      if (r.source === "cookidoo") {
+                        folderForSource = sec.cookFolderId || "";
+                      } else if (r.source === "chefkoch") {
+                        folderForSource = sec.chefFolderId || "";
+                      } else {
+                        folderForSource = sec.fwlFolderId || "";
+                      }
+                    }
+                    return favoriteRecipeRow(r, folderForSource);
+                  })
                   .join("")
               : "";
             let del = "";
@@ -1088,6 +1176,9 @@
               }
               if (sec.cookFolderId && sec.cookCount === 0) {
                 del += `<button type="button" class="fwl-del-folder" title="Leeren Cookidoo-Ordner löschen" aria-label="Cookidoo-Ordner löschen" data-folder-id="${esc(sec.cookFolderId)}" data-source="cookidoo">×</button>`;
+              }
+              if (sec.chefFolderId && sec.chefCount === 0) {
+                del += `<button type="button" class="fwl-del-folder" title="Leeren Chefkoch-Ordner löschen" aria-label="Chefkoch-Ordner löschen" data-folder-id="${esc(sec.chefFolderId)}" data-source="chefkoch">×</button>`;
               }
             }
             return `<div class="fwl-folder">
@@ -1106,7 +1197,7 @@
       }
 
       const summary = joined
-        ? `${esc(total)} Favoriten (FWL + Cookidoo)`
+        ? `${esc(total)} Favoriten (${esc(labels.join(" + "))})`
         : `${esc(total)} Favoriten`;
 
       root.innerHTML = `
@@ -1177,7 +1268,9 @@
           ev.preventDefault();
           ev.stopPropagation();
           const name = await promptText(
-            joined ? "Neuen Ordner anlegen (FWL + Cookidoo)" : "Neuen Ordner anlegen",
+            joined
+              ? `Neuen Ordner anlegen (${labels.join(" + ")})`
+              : "Neuen Ordner anlegen",
             "Ordnername"
           );
           if (!name) return;
@@ -1186,9 +1279,9 @@
             await this._hass.callService("foodwithlove", "create_favorite_folder", {
               name,
             });
-            if (joined) {
+            for (const partner of partners) {
               await this._hass.callService(
-                "cookidoo_collections",
+                collectionsDomain(partner.source),
                 "create_favorite_folder",
                 { name }
               );
@@ -1211,11 +1304,11 @@
           if (!window.confirm("Leeren Ordner wirklich löschen?")) return;
           btn.disabled = true;
           try {
-            const domain =
-              source === "cookidoo" ? "cookidoo_collections" : "foodwithlove";
-            await this._hass.callService(domain, "delete_favorite_folder", {
-              folder_id: folderId,
-            });
+            await this._hass.callService(
+              collectionsDomain(source),
+              "delete_favorite_folder",
+              { folder_id: folderId }
+            );
           } catch (err) {
             console.error("delete folder failed", err);
             window.alert("Ordner konnte nicht gelöscht werden (nur leere Ordner).");
@@ -1234,7 +1327,11 @@
           const source = btn.getAttribute("data-source") || "fwl";
           if (!recipeId) return;
           const folderChoices =
-            source === "cookidoo" ? cookFolders : folders;
+            source === "cookidoo"
+              ? cookFolders
+              : source === "chefkoch"
+                ? chefFolders
+                : folders;
           const chosen = await pickFolder(
             `„${recipeTitle}“ verschieben`,
             folderChoices,
@@ -1250,9 +1347,11 @@
           try {
             const data = { recipe_id: recipeId };
             if (chosen) data.folder_id = chosen;
-            const domain =
-              source === "cookidoo" ? "cookidoo_collections" : "foodwithlove";
-            await this._hass.callService(domain, "move_favorite", data);
+            await this._hass.callService(
+              collectionsDomain(source),
+              "move_favorite",
+              data
+            );
           } catch (err) {
             console.error("move favorite failed", err);
             window.alert("Konnte nicht verschieben.");
@@ -1272,12 +1371,11 @@
           if (!day || !recipeId) return;
           btn.disabled = true;
           try {
-            const domain =
-              source === "cookidoo" ? "cookidoo_collections" : "foodwithlove";
-            await this._hass.callService(domain, "add_weekplan_meal", {
-              date: day,
-              recipe_id: recipeId,
-            });
+            await this._hass.callService(
+              collectionsDomain(source),
+              "add_weekplan_meal",
+              { date: day, recipe_id: recipeId }
+            );
           } catch (err) {
             console.error("add weekplan meal failed", err);
             window.alert("Konnte nicht zum Wochenplan hinzufügen.");
@@ -1355,7 +1453,7 @@
       type: "fwl-week-card",
       name: "food with love week",
       description:
-        "Week overview; optional cookidoo_entity (with images) or cookidoo_calendar",
+        "Week overview; optional cookidoo_entity / chefkoch_entity (with images) or cookidoo_calendar",
     },
     {
       type: "fwl-recipe-card",
@@ -1366,7 +1464,7 @@
       type: "fwl-favorites-card",
       name: "food with love favorites",
       description:
-        "Favorite folders; optional cookidoo_entity for joined FWL + Cookidoo view",
+        "Favorite folders; optional cookidoo_entity / chefkoch_entity for joined view",
     },
     {
       type: "fwl-food-card",

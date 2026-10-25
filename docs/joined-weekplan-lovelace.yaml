@@ -1,21 +1,26 @@
-# Joined FWL + Cookidoo Lovelace snippets
-# Requires: foodwithlove >= 0.5.8 + ha-cookidoo-collections
+# Joined FWL + Cookidoo / Chefkoch Lovelace snippets
+# Requires: foodwithlove >= 0.5.9
+# Optional companions:
+#   - ha-cookidoo-collections → cookidoo_entity
+#   - ha-chefkoch-collections → chefkoch_entity
 # Optional: core Cookidoo integration for calendar.cookidoo_speiseplan / shopping todos
 
-# Stock dual calendar
+# Stock dual calendar (Cookidoo core calendar)
 - type: calendar
   entities:
     - calendar.food_with_love_wochenplan
     - calendar.cookidoo_speiseplan
   initial_view: listWeek
 
-# Joined week overview (FWL card + Cookidoo meals/images)
+# Joined week overview (FWL card + partner meals/images)
 - type: custom:fwl-week-card
   entity: sensor.food_with_love_wochenuberblick
   cookidoo_entity: sensor.cookidoo_collections_favoriten
+  chefkoch_entity: sensor.chefkoch_collections_favoriten
 
 # Joined favorites (merged folders; actions route by source)
 - type: custom:fwl-favorites-card
-  title: Favoriten (FWL + Cookidoo)
+  title: Favoriten (FWL + Cookidoo + Chefkoch)
   entity: sensor.food_with_love_favoriten
   cookidoo_entity: sensor.cookidoo_collections_favoriten
+  chefkoch_entity: sensor.chefkoch_collections_favoriten

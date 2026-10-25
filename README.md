@@ -80,25 +80,28 @@ type: custom:fwl-favorites-card
 entity: sensor.food_with_love_favoriten
 ```
 
-### Optional: join Cookidoo favorites / week plan
+### Optional: join Cookidoo / Chefkoch favorites / week plan
 
-Install the companion integration
-[ha-cookidoo-collections](https://github.com/janhuehne/ha-cookidoo-collections)
-(plus the official HA **Cookidoo** integration for shopping list / calendar if you want those).
+Install companion integrations as needed:
 
-Then point the FWL cards at the collections sensor:
+- [ha-cookidoo-collections](https://github.com/janhuehne/ha-cookidoo-collections) (plus the official HA **Cookidoo** integration for shopping list / calendar)
+- [ha-chefkoch-collections](https://github.com/janhuehne/ha-chefkoch-collections)
+
+Then point the FWL cards at the collections sensors (`cookidoo_entity` / `chefkoch_entity` are independent):
 
 ```yaml
 type: custom:fwl-week-card
 entity: sensor.food_with_love_wochenuberblick
 cookidoo_entity: sensor.cookidoo_collections_favoriten
+chefkoch_entity: sensor.chefkoch_collections_favoriten
 
 type: custom:fwl-favorites-card
 entity: sensor.food_with_love_favoriten
 cookidoo_entity: sensor.cookidoo_collections_favoriten
+chefkoch_entity: sensor.chefkoch_collections_favoriten
 ```
 
-Folders are merged by name; add / move / remove / create-folder actions route to FWL or Cookidoo by recipe source.
+Folders are merged by name; add / move / remove / create-folder actions route by recipe source.
 
 Also useful:
 
