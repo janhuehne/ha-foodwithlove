@@ -848,7 +848,7 @@
     });
   }
 
-  function pickFolder(title, folders, currentId) {
+  function pickFolder(title, folders, currentId, optionsCfg) {
     return new Promise((resolve) => {
       const existing = document.getElementById("fwl-folder-picker");
       if (existing) existing.remove();
@@ -875,8 +875,10 @@
         "border:1px solid var(--divider-color,#ccc);margin-bottom:.85rem;" +
         "background:transparent;color:inherit;box-sizing:border-box;";
 
+      const emptyLabel =
+        (optionsCfg && optionsCfg.emptyLabel) || "Ohne Ordner";
       const options = [
-        { id: "", name: "Ohne Ordner" },
+        { id: "", name: emptyLabel },
         ...folders.map((f) => ({ id: f.id, name: f.name || "Ordner" })),
       ];
       for (const opt of options) {
@@ -1043,19 +1045,29 @@
         return sec;
       };
 
+      const ensureUncategorized = () => {
+        let sec = byKey.get("__uncategorized__");
+        if (!sec) {
+          sec = {
+            id: "__uncategorized__",
+            name: "Ohne Ordner",
+            recipes: [],
+            fwlFolderId: null,
+            cookFolderId: null,
+            chefFolderId: null,
+            fwlCount: 0,
+            cookCount: 0,
+            chefCount: 0,
+          };
+          byKey.set(sec.id, sec);
+        }
+        return sec;
+      };
+
       if (uncategorized.length) {
-        const sec = {
-          id: "__uncategorized__",
-          name: "Ohne Ordner",
-          recipes: this._tagRecipes(uncategorized, "fwl"),
-          fwlFolderId: null,
-          cookFolderId: null,
-          chefFolderId: null,
-          fwlCount: uncategorized.length,
-          cookCount: 0,
-          chefCount: 0,
-        };
-        byKey.set(sec.id, sec);
+        const sec = ensureUncategorized();
+        sec.recipes.push(...this._tagRecipes(uncategorized, "fwl"));
+        sec.fwlCount = uncategorized.length;
       }
 
       for (const f of folders) {
@@ -1085,6 +1097,13 @@
               ? "chefCount"
               : null;
         if (!idKey) continue;
+        const partnerUncategorized = partner.uncategorized || [];
+        if (partnerUncategorized.length) {
+          const sec = ensureUncategorized();
+          const tagged = this._tagRecipes(partnerUncategorized, source);
+          sec.recipes.push(...tagged);
+          sec[countKey] = (sec[countKey] || 0) + tagged.length;
+        }
         for (const f of partner.folders || []) {
           const sec = ensure(f.name || "Ordner");
           if (f.id) sec[idKey] = f.id;
@@ -1096,7 +1115,7 @@
             folder_id: f.id || r.folder_id || null,
           }));
           sec.recipes.push(...tagged);
-          sec[countKey] = tagged.length;
+          sec[countKey] = (sec[countKey] || 0) + tagged.length;
         }
       }
 
@@ -1156,6 +1175,7 @@
         partners.push({
           source: "cookidoo",
           folders: cookFolders,
+          uncategorized: cookAttrs.uncategorized || [],
           entity: cookEnt,
         });
         labels.push("Cookidoo");
@@ -1170,6 +1190,7 @@
         partners.push({
           source: "chefkoch",
           folders: chefFolders,
+          uncategorized: chefAttrs.uncategorized || [],
           entity: chefEnt,
         });
         labels.push("Chefkoch");
@@ -1396,7 +1417,11 @@
           const chosen = await pickFolder(
             `„${recipeTitle}“ verschieben`,
             folderChoices,
-            currentFolder
+            currentFolder,
+            {
+              emptyLabel:
+                source === "chefkoch" ? "Hauptsammlung" : "Ohne Ordner",
+            }
           );
           if (chosen === undefined) return;
           const same =

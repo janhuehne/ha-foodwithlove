@@ -1,5 +1,6 @@
 # Joined FWL + Cookidoo / Chefkoch Lovelace snippets
-# Requires: foodwithlove >= 0.5.10
+# Requires: foodwithlove >= 0.5.11
+# Chefkoch Hauptsammlung joins FWL “Ohne Ordner” via uncategorized
 # Optional companions:
 #   - ha-cookidoo-collections → cookidoo_entity
 #   - ha-chefkoch-collections → chefkoch_entity
