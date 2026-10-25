@@ -3,7 +3,8 @@
 # Chefkoch Hauptsammlung joins FWL “Ohne Ordner” via uncategorized
 # Optional companions:
 #   - ha-cookidoo-collections → cookidoo_entity
-#   - ha-chefkoch-collections → chefkoch_entity
+#   - ha-chefkoch-collections ≥0.1.4 → chefkoch_entity (or auto-discover;
+#     favorites also load via GET /api/chefkoch_collections/favorites)
 # Optional: core Cookidoo integration for calendar.cookidoo_speiseplan / shopping todos
 
 # Stock dual calendar (Cookidoo core calendar)

@@ -1081,20 +1081,87 @@
         throw new Error("entity is required");
       }
       this._open = this._open || new Set();
+      this._chefPayload = this._chefPayload || null;
+      this._chefPayloadKey = this._chefPayloadKey || "";
+      this._chefLoading = false;
+      this._chefError = "";
     }
 
     set hass(hass) {
       this._hass = hass;
-      this._render();
+      this._loadChefkochFavorites().finally(() => this._render());
     }
 
     getCardSize() {
       return 6;
     }
 
+    async _loadChefkochFavorites() {
+      if (!this._hass || this._chefLoading) return;
+      const primaryEntity = (this._config && this._config.entity) || "";
+      const chefEnt = findCollectionsEntity(
+        this._hass,
+        "chefkoch",
+        (this._config && this._config.chefkoch_entity) || "",
+        primaryEntity
+      );
+      const chefSt = chefEnt ? this._hass.states[chefEnt] : null;
+      const stateKey = chefSt
+        ? `${chefEnt}|${chefSt.last_updated}|${chefSt.state}`
+        : "none";
+      // Always try the dedicated API (full nested folders/recipes).
+      const apiKey = `api|${stateKey}`;
+      if (apiKey === this._chefPayloadKey && this._chefPayload) return;
+
+      this._chefLoading = true;
+      try {
+        const data = await this._hass.callApi(
+          "GET",
+          "chefkoch_collections/favorites"
+        );
+        if (
+          data &&
+          (Array.isArray(data.favorite_folders) ||
+            Array.isArray(data.uncategorized))
+        ) {
+          this._chefPayload = data;
+          this._chefPayloadKey = apiKey;
+          this._chefError = "";
+          return;
+        }
+      } catch (err) {
+        // Fall back to entity attributes when API is unavailable.
+        this._chefError = String((err && err.message) || err || "api_error");
+      } finally {
+        this._chefLoading = false;
+      }
+
+      // Cache under apiKey so we do not re-hit the API until the sensor changes.
+      if (chefSt && chefSt.attributes) {
+        this._chefPayload = {
+          favorite_folders: chefSt.attributes.favorite_folders || [],
+          uncategorized: chefSt.attributes.uncategorized || [],
+          favorite_count: chefSt.attributes.favorite_count || chefSt.state,
+          has_meal_planner: !!chefSt.attributes.has_meal_planner,
+          source: "chefkoch",
+          entity_id: chefEnt,
+        };
+        this._chefPayloadKey = apiKey;
+      } else {
+        this._chefPayload = null;
+        this._chefPayloadKey = apiKey;
+      }
+    }
+
     _toggle(id) {
-      if (this._open.has(id)) this._open.delete(id);
-      else this._open.add(id);
+      this._userClosed = this._userClosed || new Set();
+      if (this._open.has(id)) {
+        this._open.delete(id);
+        this._userClosed.add(id);
+      } else {
+        this._open.add(id);
+        this._userClosed.delete(id);
+      }
       this._render();
     }
 
@@ -1249,8 +1316,8 @@
       if (!this._hass || !this._config) return;
       const st = this._hass.states[this._config.entity];
       const attrs = (st && st.attributes) || {};
-      const folders = attrs.favorite_folders || [];
-      const uncategorized = attrs.uncategorized || [];
+      let folders = attrs.favorite_folders || [];
+      let uncategorized = attrs.uncategorized || [];
       // Prefer sensor-declared source so a Chefkoch/Cookidoo primary entity
       // is not mis-tagged as FWL (which hid the Chefkoch badge).
       const primarySource =
@@ -1302,35 +1369,63 @@
           `Cookidoo ← ${cookEnt} (${stats.folderCount} Ordner, ${stats.recipeCount} Rezepte)`
         );
       }
-      if (chefEnt) {
-        const chefSt = this._hass.states[chefEnt];
-        const chefAttrs = (chefSt && chefSt.attributes) || {};
-        chefFolders = chefAttrs.favorite_folders || [];
-        const chefUnc = chefAttrs.uncategorized || [];
-        chefCanPlan = !!chefAttrs.has_meal_planner;
+      // Prefer API payload (full nested recipes); fall back to entity attrs.
+      const chefPayload = this._chefPayload;
+      const chefPayloadOk =
+        !!chefPayload &&
+        (Array.isArray(chefPayload.favorite_folders) ||
+          Array.isArray(chefPayload.uncategorized));
+      if (chefPayloadOk && primarySource === "chefkoch") {
+        // Primary is Chefkoch: replace truncated state attrs with API data.
+        chefFolders = chefPayload.favorite_folders || [];
+        uncategorized = chefPayload.uncategorized || [];
+        folders = chefFolders;
+        chefCanPlan = !!chefPayload.has_meal_planner;
+        total = Number(
+          chefPayload.favorite_count != null
+            ? chefPayload.favorite_count
+            : partnerFolderStats(chefFolders, uncategorized).recipeCount
+        );
+        const stats = partnerFolderStats(chefFolders, uncategorized);
+        joinNotes.push(
+          `Chefkoch ← api/chefkoch_collections/favorites (${stats.folderCount} Ordner, ${stats.recipeCount} Rezepte)`
+        );
+      } else if (chefPayloadOk) {
+        chefFolders = chefPayload.favorite_folders || [];
+        const chefUnc = chefPayload.uncategorized || [];
+        chefCanPlan = !!chefPayload.has_meal_planner;
         total +=
-          Number(chefAttrs.favorite_count || (chefSt && chefSt.state) || 0) || 0;
+          Number(
+            chefPayload.favorite_count != null
+              ? chefPayload.favorite_count
+              : partnerFolderStats(chefFolders, chefUnc).recipeCount
+          ) || 0;
         partners.push({
           source: "chefkoch",
           folders: chefFolders,
           uncategorized: chefUnc,
-          entity: chefEnt,
+          entity: chefEnt || "api:chefkoch_collections",
         });
         if (!labels.includes("Chefkoch")) labels.push("Chefkoch");
         const stats = partnerFolderStats(chefFolders, chefUnc);
+        const via = chefEnt ? chefEnt : "api/chefkoch_collections/favorites";
         joinNotes.push(
-          `Chefkoch ← ${chefEnt} (${stats.folderCount} Ordner, ${stats.recipeCount} Rezepte)`
+          `Chefkoch ← ${via} (${stats.folderCount} Ordner, ${stats.recipeCount} Rezepte)`
         );
       } else if (this._config.chefkoch_entity) {
         joinNotes.push(
           `Chefkoch: ${this._config.chefkoch_entity} nicht verfügbar`
         );
+      } else if (this._chefError) {
+        joinNotes.push(
+          "Chefkoch: API nicht erreichbar — Collections-Integration aktualisieren/neustarten"
+        );
       } else {
         joinNotes.push(
-          "Chefkoch: kein Collections-Sensor gefunden (Integration installieren/aktualisieren)"
+          "Chefkoch: warte auf Daten… (Integration installieren falls fehlend)"
         );
       }
-      const joined = partners.length > 0;
+      const joined = partners.length > 0 || primarySource === "chefkoch";
       const sections = this._mergeFavoriteSections(
         folders,
         uncategorized,
@@ -1338,11 +1433,13 @@
         primarySource
       );
 
-      // Auto-open folders that contain Chefkoch recipes once, so they are visible.
-      if (!this._autoOpenedChef && chefEnt) {
-        this._autoOpenedChef = true;
+      // Keep Chefkoch folders expanded until the user collapses them.
+      this._userClosed = this._userClosed || new Set();
+      if (chefPayloadOk) {
         for (const sec of sections) {
-          if (sec.chefCount > 0) this._open.add(sec.id);
+          if (sec.chefCount > 0 && !this._userClosed.has(sec.id)) {
+            this._open.add(sec.id);
+          }
         }
       }
 
@@ -1397,7 +1494,16 @@
                 </button>
                 ${del}
               </div>
-              ${open ? `<div class="fwl-folder-body">${recipes || "<em>Leer</em>"}</div>` : ""}
+              ${
+                open
+                  ? `<div class="fwl-folder-body">${
+                      recipes ||
+                      (sec.chefFolderId && !sec.chefCount
+                        ? "<em>Chefkoch-Ordner ohne Rezeptdaten — Collections aktualisieren (API)</em>"
+                        : "<em>Leer</em>")
+                    }</div>`
+                  : ""
+              }
             </div>`;
           })
           .join("");
@@ -1406,8 +1512,17 @@
       const summary = joined
         ? `${esc(total)} Favoriten (${esc(labels.join(" + "))})`
         : `${esc(total)} Favoriten`;
+      const chefJoined =
+        chefPayloadOk ||
+        primarySource === "chefkoch" ||
+        labels.includes("Chefkoch");
       const joinStatus = joinNotes
-        .map((n) => `<div class="join-status">${esc(n)}</div>`)
+        .map((n) => {
+          const warn =
+            !chefJoined &&
+            (n.startsWith("Chefkoch:") || n.includes("API nicht"));
+          return `<div class="join-status${warn ? " warn" : ""}">${esc(n)}</div>`;
+        })
         .join("");
       root.innerHTML = `
         <ha-card>
@@ -1421,6 +1536,10 @@
             .join-status {
               opacity: .7; font-size: .8rem; margin: -.35rem 0 .65rem;
               font-family: var(--code-font-family, monospace);
+            }
+            .join-status.warn {
+              opacity: 1; color: var(--warning-color, #f44336);
+              font-family: inherit; font-weight: 600;
             }
             button.fwl-new-folder {
               appearance: none; border: 1px solid var(--divider-color, #ddd);

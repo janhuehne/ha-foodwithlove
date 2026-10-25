@@ -87,7 +87,7 @@ Install companion integrations as needed:
 - [ha-cookidoo-collections](https://github.com/janhuehne/ha-cookidoo-collections) (plus the official HA **Cookidoo** integration for shopping list / calendar)
 - [ha-chefkoch-collections](https://github.com/janhuehne/ha-chefkoch-collections) (≥ 0.1.2; weekplan add is Plus-gated via `has_meal_planner`)
 
-Then point the FWL cards at the collections sensors (`cookidoo_entity` / `chefkoch_entity` are independent):
+Then point the FWL cards at the collections sensors (`cookidoo_entity` / `chefkoch_entity` are independent). Chefkoch favorites prefer `GET /api/chefkoch_collections/favorites` (ha-chefkoch-collections ≥0.1.4, foodwithlove ≥0.5.15) so nested recipes are not truncated by state attributes; the card falls back to the sensor when the API is missing:
 
 ```yaml
 type: custom:fwl-week-card
