@@ -20,7 +20,7 @@
   const VIEWER_PATH_RE = /^\/api\/foodwithlove\/recipe\/[A-Za-z0-9_%-]+$/;
   const APP_HOST = "www.foodwithlove.de";
   const IMAGE_HOST_RE =
-    /^(?:storage\.googleapis\.com|(?:[\w-]+\.)?googleapis\.com|www\.foodwithlove\.de|foodwithlove\.de|food-with-love-app\.web\.app|food-with-love-app\.firebaseapp\.com)$/i;
+    /^(?:storage\.googleapis\.com|(?:[\w-]+\.)?googleapis\.com|www\.foodwithlove\.de|foodwithlove\.de|food-with-love-app\.web\.app|food-with-love-app\.firebaseapp\.com|assets\.tmecosys\.com|(?:[\w-]+\.)?tmecosys\.com)$/i;
 
   function normalizeViewerPath(viewerUrl) {
     if (!viewerUrl) return null;
@@ -48,6 +48,23 @@
     }
   }
 
+  const COOKIDOO_HOST_RE =
+    /^cookidoo\.(?:de|at|ch|com|co\.uk|international|fr|it|es|nl|pl|pt|be)$/i;
+
+  /** Allowlisted Cookidoo recipe deep links (joined favorites). */
+  function safeCookidooUrl(url) {
+    if (!url) return null;
+    try {
+      const u = new URL(String(url));
+      if (u.protocol !== "https:") return null;
+      if (!COOKIDOO_HOST_RE.test(u.hostname)) return null;
+      if (!u.pathname.includes("/recipes/recipe/")) return null;
+      return u.toString();
+    } catch (_err) {
+      return null;
+    }
+  }
+
   async function fetchRecipeHtml(hass, viewerUrl) {
     if (!hass) return null;
     const path = normalizeViewerPath(viewerUrl);
@@ -66,6 +83,11 @@
   }
 
   async function openRecipe(hass, { appUrl, viewerUrl }) {
+    const safeCookidoo = safeCookidooUrl(appUrl);
+    if (safeCookidoo) {
+      window.open(safeCookidoo, "_blank", "noopener,noreferrer");
+      return;
+    }
     const safeApp = safeAppUrl(appUrl);
     if (preferApp() && safeApp) {
       window.location.assign(safeApp);
@@ -225,20 +247,32 @@
     </button>`;
   }
 
+  function sourceBadge(source) {
+    if (source === "cookidoo") {
+      return `<span class="fwl-src cookidoo" title="Cookidoo">Cookidoo</span>`;
+    }
+    if (source === "fwl") {
+      return `<span class="fwl-src fwl" title="food with love">FWL</span>`;
+    }
+    return "";
+  }
+
   function metaLine(meal) {
-    const parts = [];
+    const bits = [];
+    const badge = sourceBadge(meal.source);
+    if (badge) bits.push(badge);
     if (meal.preparation_time != null && meal.preparation_time !== "") {
-      parts.push(`${meal.preparation_time} min`);
+      bits.push(`<span>${esc(`${meal.preparation_time} min`)}</span>`);
     }
     if (meal.rating != null && meal.rating !== "") {
       const votes =
         meal.rating_count != null && meal.rating_count !== ""
           ? ` (${meal.rating_count})`
           : "";
-      parts.push(`★ ${meal.rating}${votes}`);
+      bits.push(`<span>${esc(`★ ${meal.rating}${votes}`)}</span>`);
     }
-    return parts.length
-      ? `<div class="fwl-prep">${esc(parts.join(" · "))}</div>`
+    return bits.length
+      ? `<div class="fwl-prep">${bits.join('<span class="fwl-prep-sep"> · </span>')}</div>`
       : "";
   }
 
@@ -262,13 +296,18 @@
 
   function mealRow(meal, dayDate) {
     const date = meal.date || dayDate || "";
+    const source = meal.source || "fwl";
     const custom = meal.custom ? "1" : "0";
     const key = meal.custom ? meal.title || "" : meal.recipe_id || "";
     const remove =
       date && key
-        ? `<button type="button" class="fwl-remove" title="Aus Wochenplan entfernen" aria-label="Entfernen" data-date="${esc(date)}" data-key="${esc(key)}" data-custom="${custom}" data-title="${esc(meal.title || "")}">×</button>`
+        ? `<button type="button" class="fwl-remove" title="Aus Wochenplan entfernen" aria-label="Entfernen" data-date="${esc(date)}" data-key="${esc(key)}" data-custom="${custom}" data-source="${esc(source)}" data-title="${esc(meal.title || "")}">×</button>`
         : "";
-    return `<div class="fwl-meal">${mealMain(meal, 72)}${openIconButton(meal.app_url, meal.viewer_url)}${remove}</div>`;
+    const openBtn =
+      meal.app_url || meal.viewer_url
+        ? openIconButton(meal.app_url, meal.viewer_url)
+        : "";
+    return `<div class="fwl-meal">${mealMain(meal, 72)}${openBtn}${remove}</div>`;
   }
 
   function bindOpens(root, hass) {
@@ -296,14 +335,22 @@
         const custom = btn.getAttribute("data-custom") === "1";
         const key = btn.getAttribute("data-key") || "";
         const date = btn.getAttribute("data-date") || "";
-        const data = { date, custom };
-        if (custom) data.title = key;
-        else data.recipe_id = key;
+        const source = btn.getAttribute("data-source") || "fwl";
+        const data = { date };
+        if (source === "cookidoo") {
+          data.recipe_id = key;
+        } else {
+          data.custom = custom;
+          if (custom) data.title = key;
+          else data.recipe_id = key;
+        }
         btn.disabled = true;
         try {
-          await hass.callService("foodwithlove", "remove_weekplan_meal", data);
+          const domain =
+            source === "cookidoo" ? "cookidoo_collections" : "foodwithlove";
+          await hass.callService(domain, "remove_weekplan_meal", data);
         } catch (err) {
-          console.error("fwl remove weekplan meal failed", err);
+          console.error("remove weekplan meal failed", err);
           window.alert("Konnte nicht entfernt werden.");
           btn.disabled = false;
         }
@@ -317,21 +364,143 @@
       if (!this._config.entity) {
         throw new Error("entity is required");
       }
+      this._cookByDay = this._cookByDay || {};
+      this._cookKey = this._cookKey || "";
+      this._cookLoading = false;
     }
 
     set hass(hass) {
       this._hass = hass;
-      this._render();
+      this._loadCookidooEvents().finally(() => this._render());
     }
 
     getCardSize() {
       return 6;
     }
 
+    _fwlDays() {
+      const st = this._hass && this._hass.states[this._config.entity];
+      return (st && st.attributes && st.attributes.days) || [];
+    }
+
+    _cookidooFromSensor() {
+      const ent = this._config.cookidoo_entity;
+      if (!ent || !this._hass) return null;
+      const st = this._hass.states[ent];
+      const meals = (st && st.attributes && st.attributes.week_meals) || null;
+      return Array.isArray(meals) ? meals : null;
+    }
+
+    async _loadCookidooEvents() {
+      if (!this._hass) {
+        this._cookByDay = {};
+        this._cookKey = "";
+        return;
+      }
+      const days = this._fwlDays();
+      if (!days.length) return;
+      const start = days[0].date;
+      const last = days[days.length - 1].date;
+      if (!start || !last) return;
+
+      // Prefer cookidoo_collections sensor (includes thumbnails).
+      const sensorMeals = this._cookidooFromSensor();
+      if (sensorMeals) {
+        const key = `sensor|${this._config.cookidoo_entity}|${start}|${last}|${sensorMeals.length}`;
+        if (key === this._cookKey) return;
+        const byDay = {};
+        for (const meal of sensorMeals) {
+          const day = meal.date || "";
+          if (!day || day < start || day > last) continue;
+          if (!byDay[day]) byDay[day] = [];
+          byDay[day].push({ ...meal, source: "cookidoo" });
+        }
+        this._cookByDay = byDay;
+        this._cookKey = key;
+        return;
+      }
+
+      const cal = this._config.cookidoo_calendar;
+      if (!cal) {
+        this._cookByDay = {};
+        this._cookKey = "";
+        return;
+      }
+      // Calendar end is exclusive — advance one day.
+      const endDate = new Date(`${last}T12:00:00`);
+      endDate.setDate(endDate.getDate() + 1);
+      const end = endDate.toISOString().slice(0, 10);
+      const key = `${cal}|${start}|${end}`;
+      if (key === this._cookKey || this._cookLoading) return;
+      this._cookLoading = true;
+      try {
+        const events = await this._hass.callApi(
+          "GET",
+          `calendars/${encodeURIComponent(cal)}?start=${encodeURIComponent(start + "T00:00:00")}&end=${encodeURIComponent(end + "T00:00:00")}`
+        );
+        const byDay = {};
+        for (const ev of events || []) {
+          const day =
+            (ev.start && (ev.start.date || String(ev.start.dateTime || "").slice(0, 10))) ||
+            "";
+          if (!day) continue;
+          const title = ev.summary || "Cookidoo";
+          let prep = null;
+          const m = String(ev.description || "").match(
+            /Total Time:\s*([0-9]+(?:\.[0-9]+)?)/i
+          );
+          if (m) prep = Math.round(Number(m[1]) / 60);
+          if (!byDay[day]) byDay[day] = [];
+          byDay[day].push({
+            title,
+            date: day,
+            source: "cookidoo",
+            recipe_id: null,
+            custom: false,
+            app_url: null,
+            viewer_url: null,
+            preparation_time: prep,
+            image_url: null,
+          });
+        }
+        this._cookByDay = byDay;
+        this._cookKey = key;
+      } catch (err) {
+        console.error("fwl cookidoo calendar fetch failed", err);
+        this._cookByDay = {};
+        this._cookKey = "";
+      } finally {
+        this._cookLoading = false;
+      }
+    }
+
+    _mergedDays() {
+      const days = this._fwlDays();
+      const cook = this._cookByDay || {};
+      return days.map((d) => {
+        const fwlMeals = (d.meals || []).map((m) => ({
+          ...m,
+          source: m.source || "fwl",
+          date: m.date || d.date,
+        }));
+        const cookMeals = cook[d.date] || [];
+        const meals = [...fwlMeals, ...cookMeals];
+        meals.sort((a, b) =>
+          String(a.title || "").localeCompare(String(b.title || ""), "de", {
+            sensitivity: "base",
+          })
+        );
+        return {
+          ...d,
+          meals,
+          empty: meals.length === 0,
+        };
+      });
+    }
+
     _render() {
       if (!this._hass || !this._config) return;
-      const st = this._hass.states[this._config.entity];
-      const days = (st && st.attributes && st.attributes.days) || [];
+      const days = this._mergedDays();
       const root = this.shadowRoot || this.attachShadow({ mode: "open" });
       let body;
       if (!days.length) {
@@ -389,7 +558,19 @@
       .fwl-main { display: flex; align-items: center; gap: .55rem; flex: 1; min-width: 0; }
       .fwl-text { min-width: 0; line-height: 1.3; }
       .fwl-text strong { display: block; }
-      .fwl-prep { opacity: .75; font-weight: 400; font-size: .92em; margin-top: .15rem; }
+      .fwl-prep {
+        opacity: .75; font-weight: 400; font-size: .92em; margin-top: .15rem;
+        display: flex; flex-wrap: wrap; align-items: center; gap: .25rem;
+      }
+      .fwl-prep-sep { opacity: .7; }
+      .fwl-src {
+        flex: 0 0 auto; border-radius: 4px; padding: .05rem .3rem;
+        font-size: .65rem; font-weight: 700; line-height: 1.2;
+        display: inline-flex; align-items: center; justify-content: center;
+        white-space: nowrap; opacity: 1;
+      }
+      .fwl-src.fwl { background: #e8f5e9; color: #2e7d32; }
+      .fwl-src.cookidoo { background: #e3f2fd; color: #1565c0; }
       button.fwl-icon-btn {
         appearance: none; border: 1px solid var(--divider-color, #ddd);
         background: transparent; color: var(--primary-color, #03a9f4);
@@ -676,16 +857,62 @@
     });
   }
 
-  function favoriteRecipeRow(recipe, folderId) {
+  /** Normalize folder titles so FWL + Cookidoo categories can merge. */
+  function folderMergeKey(name) {
+    const raw = String(name || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    const aliases = {
+      salat: "salat",
+      "kuchen & gebäck": "kuchen",
+      kuchen: "kuchen",
+      "snack & fingerfood": "snack",
+      fingerfood: "snack",
+      snack: "snack",
+      "beilagen & saucen": "beilagen",
+      saucen: "beilagen",
+      dip: "beilagen",
+      getränke: "getränke",
+      getranke: "getränke",
+      nachtisch: "nachtisch",
+      muffins: "muffins",
+      suppe: "suppe",
+      hauptgericht: "hauptgericht",
+    };
+    return aliases[raw] || raw;
+  }
+
+  function folderDisplayName(key, preferred) {
+    const titles = {
+      salat: "Salat",
+      kuchen: "Kuchen",
+      snack: "Snack",
+      beilagen: "Beilagen & Saucen",
+      getränke: "Getränke",
+      nachtisch: "Nachtisch",
+      muffins: "Muffins",
+      suppe: "Suppe",
+      hauptgericht: "Hauptgericht",
+    };
+    if (titles[key]) return titles[key];
+    const name = String(preferred || key || "Ordner").trim();
+    return name ? name.charAt(0).toUpperCase() + name.slice(1) : "Ordner";
+  }
+
+  function favoriteRecipeRow(recipe, folderIdForSource) {
     const rid = recipe.recipe_id || "";
+    const source = recipe.source || "fwl";
+    const openBtn = openIconButton(recipe.app_url, recipe.viewer_url);
+    const folderId = folderIdForSource || recipe.folder_id || "";
     if (!rid) {
-      return `<div class="fwl-fav-recipe">${mealMain(recipe, 56)}${openIconButton(recipe.app_url, recipe.viewer_url)}</div>`;
+      return `<div class="fwl-fav-recipe">${mealMain(recipe, 56)}${openBtn}</div>`;
     }
-    return `<div class="fwl-fav-recipe">${mealMain(recipe, 56)}${openIconButton(recipe.app_url, recipe.viewer_url)}
+    return `<div class="fwl-fav-recipe">${mealMain(recipe, 56)}${openBtn}
       <button type="button" class="fwl-move" title="In Ordner verschieben" aria-label="In Ordner verschieben"
-        data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}" data-folder-id="${esc(folderId || "")}">↦</button>
+        data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}" data-folder-id="${esc(folderId)}" data-source="${esc(source)}">↦</button>
       <button type="button" class="fwl-add" title="Zum Wochenplan" aria-label="Zum Wochenplan"
-        data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}">+</button>
+        data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}" data-source="${esc(source)}">+</button>
     </div>`;
   }
 
@@ -713,33 +940,125 @@
       this._render();
     }
 
+    _tagRecipes(recipes, source) {
+      return (recipes || []).map((r) => ({ ...r, source: r.source || source }));
+    }
+
+    _mergeFavoriteSections(folders, uncategorized, cookFolders, joined) {
+      const byKey = new Map();
+
+      const ensure = (name) => {
+        const key = folderMergeKey(name);
+        let sec = byKey.get(key);
+        if (!sec) {
+          sec = {
+            id: key,
+            name: folderDisplayName(key, name),
+            recipes: [],
+            fwlFolderId: null,
+            cookFolderId: null,
+            fwlCount: 0,
+            cookCount: 0,
+          };
+          byKey.set(key, sec);
+        }
+        return sec;
+      };
+
+      if (uncategorized.length) {
+        const sec = {
+          id: "__uncategorized__",
+          name: "Ohne Ordner",
+          recipes: this._tagRecipes(uncategorized, "fwl"),
+          fwlFolderId: null,
+          cookFolderId: null,
+          fwlCount: uncategorized.length,
+          cookCount: 0,
+        };
+        byKey.set(sec.id, sec);
+      }
+
+      for (const f of folders) {
+        const sec = ensure(f.name || "Ordner");
+        if (f.id) sec.fwlFolderId = f.id;
+        sec.name = folderDisplayName(folderMergeKey(f.name), f.name);
+        const tagged = this._tagRecipes(f.recipes || [], "fwl").map((r) => ({
+          ...r,
+          folder_id: f.id || r.folder_id || null,
+        }));
+        sec.recipes.push(...tagged);
+        sec.fwlCount = tagged.length;
+      }
+
+      if (joined) {
+        for (const f of cookFolders) {
+          const sec = ensure(f.name || "Ordner");
+          if (f.id) sec.cookFolderId = f.id;
+          if (!sec.fwlFolderId) {
+            sec.name = folderDisplayName(folderMergeKey(f.name), f.name);
+          }
+          const tagged = this._tagRecipes(f.recipes || [], "cookidoo").map(
+            (r) => ({
+              ...r,
+              folder_id: f.id || r.folder_id || null,
+            })
+          );
+          sec.recipes.push(...tagged);
+          sec.cookCount = tagged.length;
+        }
+      }
+
+      const sections = [...byKey.values()].map((sec) => {
+        sec.recipes.sort((a, b) =>
+          String(a.title || "").localeCompare(String(b.title || ""), "de", {
+            sensitivity: "base",
+          })
+        );
+        sec.count = sec.recipes.length;
+        sec.deletable =
+          (!!sec.fwlFolderId && sec.fwlCount === 0) ||
+          (!!sec.cookFolderId && sec.cookCount === 0);
+        if (sec.id !== "__uncategorized__") {
+          sec.id =
+            sec.fwlFolderId ||
+            (sec.cookFolderId ? `cook:${sec.cookFolderId}` : `merged:${sec.id}`);
+        }
+        return sec;
+      });
+
+      sections.sort((a, b) => {
+        if (a.id === "__uncategorized__") return -1;
+        if (b.id === "__uncategorized__") return 1;
+        return String(a.name).localeCompare(String(b.name), "de", {
+          sensitivity: "base",
+        });
+      });
+      return sections;
+    }
+
     _render() {
       if (!this._hass || !this._config) return;
       const st = this._hass.states[this._config.entity];
       const attrs = (st && st.attributes) || {};
       const folders = attrs.favorite_folders || [];
       const uncategorized = attrs.uncategorized || [];
-      const total = attrs.favorite_count || (st && st.state) || 0;
-      const sections = [];
-      if (uncategorized.length) {
-        sections.push({
-          id: "__uncategorized__",
-          name: "Ohne Ordner",
-          count: uncategorized.length,
-          recipes: uncategorized,
-          deletable: false,
-        });
+      let total = Number(attrs.favorite_count || (st && st.state) || 0) || 0;
+      const joined = !!this._config.cookidoo_entity;
+      const cookSt = joined
+        ? this._hass.states[this._config.cookidoo_entity]
+        : null;
+      const cookAttrs = (cookSt && cookSt.attributes) || {};
+      const cookFolders = cookAttrs.favorite_folders || [];
+      if (joined) {
+        total +=
+          Number(cookAttrs.favorite_count || (cookSt && cookSt.state) || 0) || 0;
       }
-      for (const f of folders) {
-        const count = f.count != null ? f.count : (f.recipes || []).length;
-        sections.push({
-          id: f.id || f.name,
-          name: f.name || "Ordner",
-          count,
-          recipes: f.recipes || [],
-          deletable: count === 0 && !!f.id,
-        });
-      }
+      const sections = this._mergeFavoriteSections(
+        folders,
+        uncategorized,
+        cookFolders,
+        joined
+      );
 
       const root = this.shadowRoot || this.attachShadow({ mode: "open" });
       let body;
@@ -752,13 +1071,25 @@
             const chev = open ? "▾" : "▸";
             const recipes = open
               ? (sec.recipes || [])
-                  .map((r) => favoriteRecipeRow(r, sec.id))
+                  .map((r) =>
+                    favoriteRecipeRow(
+                      r,
+                      r.source === "cookidoo"
+                        ? r.folder_id || sec.cookFolderId || ""
+                        : r.folder_id || sec.fwlFolderId || ""
+                    )
+                  )
                   .join("")
               : "";
-            const del =
-              sec.deletable
-                ? `<button type="button" class="fwl-del-folder" title="Leeren Ordner löschen" aria-label="Ordner löschen" data-folder-id="${esc(sec.id)}">×</button>`
-                : "";
+            let del = "";
+            if (sec.deletable) {
+              if (sec.fwlFolderId && sec.fwlCount === 0) {
+                del += `<button type="button" class="fwl-del-folder" title="Leeren FWL-Ordner löschen" aria-label="FWL-Ordner löschen" data-folder-id="${esc(sec.fwlFolderId)}" data-source="fwl">×</button>`;
+              }
+              if (sec.cookFolderId && sec.cookCount === 0) {
+                del += `<button type="button" class="fwl-del-folder" title="Leeren Cookidoo-Ordner löschen" aria-label="Cookidoo-Ordner löschen" data-folder-id="${esc(sec.cookFolderId)}" data-source="cookidoo">×</button>`;
+              }
+            }
             return `<div class="fwl-folder">
               <div class="fwl-folder-row">
                 <button type="button" class="fwl-folder-head" data-id="${esc(sec.id)}">
@@ -773,6 +1104,10 @@
           })
           .join("");
       }
+
+      const summary = joined
+        ? `${esc(total)} Favoriten (FWL + Cookidoo)`
+        : `${esc(total)} Favoriten`;
 
       root.innerHTML = `
         <ha-card>
@@ -824,7 +1159,7 @@
           <div class="pad">
             ${this._config.title ? `<h2 style="margin:0 0 .35rem;font-size:1.1rem;">${esc(this._config.title)}</h2>` : ""}
             <div class="summary-row">
-              <div class="summary">${esc(total)} Favoriten</div>
+              <div class="summary">${summary}</div>
               <button type="button" class="fwl-new-folder">+ Ordner</button>
             </div>
             ${body}
@@ -841,15 +1176,25 @@
         newFolderBtn.addEventListener("click", async (ev) => {
           ev.preventDefault();
           ev.stopPropagation();
-          const name = await promptText("Neuen Ordner anlegen", "Ordnername");
+          const name = await promptText(
+            joined ? "Neuen Ordner anlegen (FWL + Cookidoo)" : "Neuen Ordner anlegen",
+            "Ordnername"
+          );
           if (!name) return;
           newFolderBtn.disabled = true;
           try {
             await this._hass.callService("foodwithlove", "create_favorite_folder", {
               name,
             });
+            if (joined) {
+              await this._hass.callService(
+                "cookidoo_collections",
+                "create_favorite_folder",
+                { name }
+              );
+            }
           } catch (err) {
-            console.error("fwl create folder failed", err);
+            console.error("create folder failed", err);
             window.alert("Ordner konnte nicht angelegt werden.");
           }
           newFolderBtn.disabled = false;
@@ -861,15 +1206,18 @@
           ev.preventDefault();
           ev.stopPropagation();
           const folderId = btn.getAttribute("data-folder-id") || "";
+          const source = btn.getAttribute("data-source") || "fwl";
           if (!folderId) return;
           if (!window.confirm("Leeren Ordner wirklich löschen?")) return;
           btn.disabled = true;
           try {
-            await this._hass.callService("foodwithlove", "delete_favorite_folder", {
+            const domain =
+              source === "cookidoo" ? "cookidoo_collections" : "foodwithlove";
+            await this._hass.callService(domain, "delete_favorite_folder", {
               folder_id: folderId,
             });
           } catch (err) {
-            console.error("fwl delete folder failed", err);
+            console.error("delete folder failed", err);
             window.alert("Ordner konnte nicht gelöscht werden (nur leere Ordner).");
             btn.disabled = false;
           }
@@ -883,10 +1231,13 @@
           const recipeId = btn.getAttribute("data-recipe-id") || "";
           const recipeTitle = btn.getAttribute("data-title") || "Rezept";
           const currentFolder = btn.getAttribute("data-folder-id") || "";
+          const source = btn.getAttribute("data-source") || "fwl";
           if (!recipeId) return;
+          const folderChoices =
+            source === "cookidoo" ? cookFolders : folders;
           const chosen = await pickFolder(
             `„${recipeTitle}“ verschieben`,
-            folders,
+            folderChoices,
             currentFolder
           );
           if (chosen === undefined) return;
@@ -899,9 +1250,11 @@
           try {
             const data = { recipe_id: recipeId };
             if (chosen) data.folder_id = chosen;
-            await this._hass.callService("foodwithlove", "move_favorite", data);
+            const domain =
+              source === "cookidoo" ? "cookidoo_collections" : "foodwithlove";
+            await this._hass.callService(domain, "move_favorite", data);
           } catch (err) {
-            console.error("fwl move favorite failed", err);
+            console.error("move favorite failed", err);
             window.alert("Konnte nicht verschieben.");
             btn.disabled = false;
           }
@@ -914,16 +1267,19 @@
           ev.stopPropagation();
           const recipeId = btn.getAttribute("data-recipe-id") || "";
           const recipeTitle = btn.getAttribute("data-title") || "Rezept";
+          const source = btn.getAttribute("data-source") || "fwl";
           const day = await pickDate(`„${recipeTitle}“ planen`);
           if (!day || !recipeId) return;
           btn.disabled = true;
           try {
-            await this._hass.callService("foodwithlove", "add_weekplan_meal", {
+            const domain =
+              source === "cookidoo" ? "cookidoo_collections" : "foodwithlove";
+            await this._hass.callService(domain, "add_weekplan_meal", {
               date: day,
               recipe_id: recipeId,
             });
           } catch (err) {
-            console.error("fwl add weekplan meal failed", err);
+            console.error("add weekplan meal failed", err);
             window.alert("Konnte nicht zum Wochenplan hinzufügen.");
             btn.disabled = false;
             return;
@@ -998,7 +1354,8 @@
     {
       type: "fwl-week-card",
       name: "food with love week",
-      description: "Week overview with device-aware recipe links",
+      description:
+        "Week overview; optional cookidoo_entity (with images) or cookidoo_calendar",
     },
     {
       type: "fwl-recipe-card",
@@ -1008,7 +1365,8 @@
     {
       type: "fwl-favorites-card",
       name: "food with love favorites",
-      description: "Favorite folders with move, create, and delete-when-empty",
+      description:
+        "Favorite folders; optional cookidoo_entity for joined FWL + Cookidoo view",
     },
     {
       type: "fwl-food-card",
