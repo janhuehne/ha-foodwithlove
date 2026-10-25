@@ -1006,13 +1006,13 @@
     const openBtn = openIconButton(recipe.app_url, recipe.viewer_url);
     const folderId = folderIdForSource || recipe.folder_id || "";
     if (!rid) {
-      return `<div class="fwl-fav-recipe">${mealMain(recipe, 56)}${openBtn}</div>`;
+      return `<div class="fwl-fav-recipe">${mealMain(recipe, 72)}${openBtn}</div>`;
     }
     const planBtn = canPlan
       ? `<button type="button" class="fwl-add" title="Zum Wochenplan" aria-label="Zum Wochenplan"
         data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}" data-source="${esc(source)}">+</button>`
       : `<button type="button" class="fwl-add" disabled title="Chefkoch Plus Wochenplaner erforderlich" aria-label="Wochenplaner nicht verfügbar">+</button>`;
-    return `<div class="fwl-fav-recipe">${mealMain(recipe, 56)}${openBtn}
+    return `<div class="fwl-fav-recipe">${mealMain(recipe, 72)}${openBtn}
       <button type="button" class="fwl-move" title="In Ordner verschieben" aria-label="In Ordner verschieben"
         data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}" data-folder-id="${esc(folderId)}" data-source="${esc(source)}">↦</button>
       ${planBtn}
