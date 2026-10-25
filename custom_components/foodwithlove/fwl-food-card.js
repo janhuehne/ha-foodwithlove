@@ -1469,8 +1469,8 @@
                 <button type="button" class="fwl-folder-head" data-id="${esc(sec.id)}">
                   <span class="chev">${chev}</span>
                   <span class="name">${esc(sec.name)}</span>
-                  <span class="count">${esc(sec.count)}</span>
                   ${sectionSourceChips(sec)}
+                  <span class="count">${esc(sec.count)}</span>
                 </button>
                 ${del}
               </div>
