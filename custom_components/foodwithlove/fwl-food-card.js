@@ -1346,10 +1346,10 @@
             ? "Cookidoo"
             : "FWL",
       ];
-      const joinNotes = [];
       let cookFolders = [];
       let chefFolders = [];
       let chefCanPlan = true;
+      let chefJoinWarn = "";
       if (cookEnt) {
         const cookSt = this._hass.states[cookEnt];
         const cookAttrs = (cookSt && cookSt.attributes) || {};
@@ -1364,10 +1364,6 @@
           entity: cookEnt,
         });
         if (!labels.includes("Cookidoo")) labels.push("Cookidoo");
-        const stats = partnerFolderStats(cookFolders, cookUnc);
-        joinNotes.push(
-          `Cookidoo ← ${cookEnt} (${stats.folderCount} Ordner, ${stats.recipeCount} Rezepte)`
-        );
       }
       // Prefer API payload (full nested recipes); fall back to entity attrs.
       const chefPayload = this._chefPayload;
@@ -1386,10 +1382,6 @@
             ? chefPayload.favorite_count
             : partnerFolderStats(chefFolders, uncategorized).recipeCount
         );
-        const stats = partnerFolderStats(chefFolders, uncategorized);
-        joinNotes.push(
-          `Chefkoch ← api/chefkoch_collections/favorites (${stats.folderCount} Ordner, ${stats.recipeCount} Rezepte)`
-        );
       } else if (chefPayloadOk) {
         chefFolders = chefPayload.favorite_folders || [];
         const chefUnc = chefPayload.uncategorized || [];
@@ -1407,23 +1399,11 @@
           entity: chefEnt || "api:chefkoch_collections",
         });
         if (!labels.includes("Chefkoch")) labels.push("Chefkoch");
-        const stats = partnerFolderStats(chefFolders, chefUnc);
-        const via = chefEnt ? chefEnt : "api/chefkoch_collections/favorites";
-        joinNotes.push(
-          `Chefkoch ← ${via} (${stats.folderCount} Ordner, ${stats.recipeCount} Rezepte)`
-        );
       } else if (this._config.chefkoch_entity) {
-        joinNotes.push(
-          `Chefkoch: ${this._config.chefkoch_entity} nicht verfügbar`
-        );
+        chefJoinWarn = `Chefkoch: ${this._config.chefkoch_entity} nicht verfügbar`;
       } else if (this._chefError) {
-        joinNotes.push(
-          "Chefkoch: API nicht erreichbar — Collections-Integration aktualisieren/neustarten"
-        );
-      } else {
-        joinNotes.push(
-          "Chefkoch: warte auf Daten… (Integration installieren falls fehlend)"
-        );
+        chefJoinWarn =
+          "Chefkoch: API nicht erreichbar — Collections-Integration aktualisieren";
       }
       const joined = partners.length > 0 || primarySource === "chefkoch";
       const sections = this._mergeFavoriteSections(
@@ -1512,18 +1492,9 @@
       const summary = joined
         ? `${esc(total)} Favoriten (${esc(labels.join(" + "))})`
         : `${esc(total)} Favoriten`;
-      const chefJoined =
-        chefPayloadOk ||
-        primarySource === "chefkoch" ||
-        labels.includes("Chefkoch");
-      const joinStatus = joinNotes
-        .map((n) => {
-          const warn =
-            !chefJoined &&
-            (n.startsWith("Chefkoch:") || n.includes("API nicht"));
-          return `<div class="join-status${warn ? " warn" : ""}">${esc(n)}</div>`;
-        })
-        .join("");
+      const joinStatus = chefJoinWarn
+        ? `<div class="join-status warn">${esc(chefJoinWarn)}</div>`
+        : "";
       root.innerHTML = `
         <ha-card>
           <style>${sharedRowStyles()}
@@ -1533,13 +1504,10 @@
               gap: .75rem; margin-bottom: .65rem;
             }
             .summary { opacity: .75; font-size: .95rem; }
-            .join-status {
-              opacity: .7; font-size: .8rem; margin: -.35rem 0 .65rem;
-              font-family: var(--code-font-family, monospace);
-            }
             .join-status.warn {
-              opacity: 1; color: var(--warning-color, #f44336);
-              font-family: inherit; font-weight: 600;
+              margin: -.35rem 0 .65rem;
+              color: var(--warning-color, #f44336);
+              font-size: .85rem; font-weight: 600;
             }
             button.fwl-new-folder {
               appearance: none; border: 1px solid var(--divider-color, #ddd);
