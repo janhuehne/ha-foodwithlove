@@ -247,10 +247,36 @@
       if (u.protocol !== "https:") return "";
       if (!IMAGE_HOST_RE.test(u.hostname)) return "";
       if (u.username || u.password) return "";
+      // Chefkoch letter tiles for recipes without a real photo.
+      if (/\/placeholders?\//i.test(u.pathname)) return "";
       return u.toString();
     } catch (_err) {
       return "";
     }
+  }
+
+  /** Drop Chefkoch dummy images from joined payloads (also covers stale cache). */
+  function scrubRecipeImages(recipe) {
+    if (!recipe || typeof recipe !== "object") return recipe;
+    const url = recipe.image_url;
+    if (url && !safeHttpsUrl(url)) {
+      return { ...recipe, image_url: null };
+    }
+    return recipe;
+  }
+
+  function scrubChefkochPayload(data) {
+    if (!data || typeof data !== "object") return data;
+    const folders = (data.favorite_folders || []).map((f) => ({
+      ...f,
+      recipes: (f.recipes || []).map(scrubRecipeImages),
+    }));
+    return {
+      ...data,
+      favorite_folders: folders,
+      uncategorized: (data.uncategorized || []).map(scrubRecipeImages),
+      week_meals: (data.week_meals || []).map(scrubRecipeImages),
+    };
   }
 
   function openHint() {
@@ -1124,7 +1150,7 @@
           (Array.isArray(data.favorite_folders) ||
             Array.isArray(data.uncategorized))
         ) {
-          this._chefPayload = data;
+          this._chefPayload = scrubChefkochPayload(data);
           this._chefPayloadKey = apiKey;
           this._chefError = "";
           return;
@@ -1138,14 +1164,15 @@
 
       // Cache under apiKey so we do not re-hit the API until the sensor changes.
       if (chefSt && chefSt.attributes) {
-        this._chefPayload = {
+        this._chefPayload = scrubChefkochPayload({
           favorite_folders: chefSt.attributes.favorite_folders || [],
           uncategorized: chefSt.attributes.uncategorized || [],
           favorite_count: chefSt.attributes.favorite_count || chefSt.state,
           has_meal_planner: !!chefSt.attributes.has_meal_planner,
+          week_meals: chefSt.attributes.week_meals || [],
           source: "chefkoch",
           entity_id: chefEnt,
-        };
+        });
         this._chefPayloadKey = apiKey;
       } else {
         this._chefPayload = null;
