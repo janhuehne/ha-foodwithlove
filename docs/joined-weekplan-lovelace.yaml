@@ -1,5 +1,5 @@
 # Joined FWL + Cookidoo / Chefkoch Lovelace snippets
-# Requires: foodwithlove >= 0.5.9
+# Requires: foodwithlove >= 0.5.10
 # Optional companions:
 #   - ha-cookidoo-collections → cookidoo_entity
 #   - ha-chefkoch-collections → chefkoch_entity

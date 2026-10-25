@@ -414,8 +414,19 @@
     _weekMealsFromEntity(entityId) {
       if (!entityId || !this._hass) return null;
       const st = this._hass.states[entityId];
-      const meals = (st && st.attributes && st.attributes.week_meals) || null;
+      if (!st) return null;
+      const meals = (st.attributes && st.attributes.week_meals) || null;
       return Array.isArray(meals) ? meals : null;
+    }
+
+    _mealsFingerprint(meals) {
+      if (!Array.isArray(meals)) return "none";
+      return `${meals.length}:${meals
+        .map(
+          (m) =>
+            `${m.date || ""}|${m.recipe_id || ""}|${m.title || ""}|${m.image_url || ""}`
+        )
+        .join(";")}`;
     }
 
     _pushPartnerMeals(byDay, meals, source, start, last) {
@@ -425,6 +436,41 @@
         if (!byDay[day]) byDay[day] = [];
         byDay[day].push({ ...meal, source: meal.source || source });
       }
+    }
+
+    async _loadCalendarInto(byDay, cal, start, last) {
+      const endDate = new Date(`${last}T12:00:00`);
+      endDate.setDate(endDate.getDate() + 1);
+      const end = endDate.toISOString().slice(0, 10);
+      const events = await this._hass.callApi(
+        "GET",
+        `calendars/${encodeURIComponent(cal)}?start=${encodeURIComponent(start + "T00:00:00")}&end=${encodeURIComponent(end + "T00:00:00")}`
+      );
+      for (const ev of events || []) {
+        const day =
+          (ev.start && (ev.start.date || String(ev.start.dateTime || "").slice(0, 10))) ||
+          "";
+        if (!day) continue;
+        const title = ev.summary || "Cookidoo";
+        let prep = null;
+        const m = String(ev.description || "").match(
+          /Total Time:\s*([0-9]+(?:\.[0-9]+)?)/i
+        );
+        if (m) prep = Math.round(Number(m[1]) / 60);
+        if (!byDay[day]) byDay[day] = [];
+        byDay[day].push({
+          title,
+          date: day,
+          source: "cookidoo",
+          recipe_id: null,
+          custom: false,
+          app_url: null,
+          viewer_url: null,
+          preparation_time: prep,
+          image_url: null,
+        });
+      }
+      return end;
     }
 
     async _loadPartnerMeals() {
@@ -441,80 +487,51 @@
 
       const cookEnt = this._config.cookidoo_entity || "";
       const chefEnt = this._config.chefkoch_entity || "";
+      const cookSt = cookEnt ? this._hass.states[cookEnt] : null;
+      const chefSt = chefEnt ? this._hass.states[chefEnt] : null;
       const cookSensor = this._weekMealsFromEntity(cookEnt);
       const chefSensor = this._weekMealsFromEntity(chefEnt);
       const cal = this._config.cookidoo_calendar || "";
+      // Prefer cookidoo_entity sensor when present; otherwise calendar can fill Cookidoo.
+      const needCal = Boolean(cal) && cookSensor === null;
 
-      if (cookSensor || chefSensor) {
-        const key = [
-          "sensor",
-          cookEnt,
-          chefEnt,
-          start,
-          last,
-          cookSensor ? cookSensor.length : 0,
-          chefSensor ? chefSensor.length : 0,
-        ].join("|");
-        if (key === this._partnerKey) return;
-        const byDay = {};
-        if (cookSensor) {
-          this._pushPartnerMeals(byDay, cookSensor, "cookidoo", start, last);
-        }
-        if (chefSensor) {
-          this._pushPartnerMeals(byDay, chefSensor, "chefkoch", start, last);
-        }
+      const key = [
+        "mixed",
+        cookEnt,
+        chefEnt,
+        needCal ? cal : "",
+        start,
+        last,
+        cookSt ? cookSt.last_updated : "",
+        chefSt ? chefSt.last_updated : "",
+        this._mealsFingerprint(cookSensor),
+        this._mealsFingerprint(chefSensor),
+      ].join("|");
+      if (key === this._partnerKey || this._cookLoading) return;
+
+      const byDay = {};
+      if (cookSensor) {
+        this._pushPartnerMeals(byDay, cookSensor, "cookidoo", start, last);
+      }
+      if (chefSensor) {
+        this._pushPartnerMeals(byDay, chefSensor, "chefkoch", start, last);
+      }
+
+      if (!needCal) {
         this._partnerByDay = byDay;
         this._partnerKey = key;
         return;
       }
 
-      if (!cal) {
-        this._partnerByDay = {};
-        this._partnerKey = "";
-        return;
-      }
-      // Calendar end is exclusive — advance one day.
-      const endDate = new Date(`${last}T12:00:00`);
-      endDate.setDate(endDate.getDate() + 1);
-      const end = endDate.toISOString().slice(0, 10);
-      const key = `${cal}|${start}|${end}`;
-      if (key === this._partnerKey || this._cookLoading) return;
       this._cookLoading = true;
       try {
-        const events = await this._hass.callApi(
-          "GET",
-          `calendars/${encodeURIComponent(cal)}?start=${encodeURIComponent(start + "T00:00:00")}&end=${encodeURIComponent(end + "T00:00:00")}`
-        );
-        const byDay = {};
-        for (const ev of events || []) {
-          const day =
-            (ev.start && (ev.start.date || String(ev.start.dateTime || "").slice(0, 10))) ||
-            "";
-          if (!day) continue;
-          const title = ev.summary || "Cookidoo";
-          let prep = null;
-          const m = String(ev.description || "").match(
-            /Total Time:\s*([0-9]+(?:\.[0-9]+)?)/i
-          );
-          if (m) prep = Math.round(Number(m[1]) / 60);
-          if (!byDay[day]) byDay[day] = [];
-          byDay[day].push({
-            title,
-            date: day,
-            source: "cookidoo",
-            recipe_id: null,
-            custom: false,
-            app_url: null,
-            viewer_url: null,
-            preparation_time: prep,
-            image_url: null,
-          });
-        }
+        await this._loadCalendarInto(byDay, cal, start, last);
         this._partnerByDay = byDay;
         this._partnerKey = key;
       } catch (err) {
         console.error("fwl cookidoo calendar fetch failed", err);
-        this._partnerByDay = {};
+        // Keep any sensor meals already pushed.
+        this._partnerByDay = byDay;
         this._partnerKey = "";
       } finally {
         this._cookLoading = false;
@@ -948,20 +965,31 @@
     return name ? name.charAt(0).toUpperCase() + name.slice(1) : "Ordner";
   }
 
-  function favoriteRecipeRow(recipe, folderIdForSource) {
+  function favoriteRecipeRow(recipe, folderIdForSource, options) {
     const rid = recipe.recipe_id || "";
     const source = recipe.source || "fwl";
+    const canPlan = !options || options.canPlan !== false;
     const openBtn = openIconButton(recipe.app_url, recipe.viewer_url);
     const folderId = folderIdForSource || recipe.folder_id || "";
     if (!rid) {
       return `<div class="fwl-fav-recipe">${mealMain(recipe, 56)}${openBtn}</div>`;
     }
+    const planBtn = canPlan
+      ? `<button type="button" class="fwl-add" title="Zum Wochenplan" aria-label="Zum Wochenplan"
+        data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}" data-source="${esc(source)}">+</button>`
+      : `<button type="button" class="fwl-add" disabled title="Chefkoch Plus Wochenplaner erforderlich" aria-label="Wochenplaner nicht verfügbar">+</button>`;
     return `<div class="fwl-fav-recipe">${mealMain(recipe, 56)}${openBtn}
       <button type="button" class="fwl-move" title="In Ordner verschieben" aria-label="In Ordner verschieben"
         data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}" data-folder-id="${esc(folderId)}" data-source="${esc(source)}">↦</button>
-      <button type="button" class="fwl-add" title="Zum Wochenplan" aria-label="Zum Wochenplan"
-        data-recipe-id="${esc(rid)}" data-title="${esc(recipe.title || "")}" data-source="${esc(source)}">+</button>
+      ${planBtn}
     </div>`;
+  }
+
+  function partnerEntityAvailable(hass, entityId) {
+    if (!hass || !entityId) return false;
+    const st = hass.states[entityId];
+    if (!st) return false;
+    return st.state !== "unavailable" && st.state !== "unknown";
   }
 
   class FwlFavoritesCard extends HTMLElement {
@@ -1118,22 +1146,32 @@
       const labels = ["FWL"];
       let cookFolders = [];
       let chefFolders = [];
-      if (cookEnt) {
+      let chefCanPlan = true;
+      if (cookEnt && partnerEntityAvailable(this._hass, cookEnt)) {
         const cookSt = this._hass.states[cookEnt];
         const cookAttrs = (cookSt && cookSt.attributes) || {};
         cookFolders = cookAttrs.favorite_folders || [];
         total +=
           Number(cookAttrs.favorite_count || (cookSt && cookSt.state) || 0) || 0;
-        partners.push({ source: "cookidoo", folders: cookFolders });
+        partners.push({
+          source: "cookidoo",
+          folders: cookFolders,
+          entity: cookEnt,
+        });
         labels.push("Cookidoo");
       }
-      if (chefEnt) {
+      if (chefEnt && partnerEntityAvailable(this._hass, chefEnt)) {
         const chefSt = this._hass.states[chefEnt];
         const chefAttrs = (chefSt && chefSt.attributes) || {};
         chefFolders = chefAttrs.favorite_folders || [];
+        chefCanPlan = !!chefAttrs.has_meal_planner;
         total +=
           Number(chefAttrs.favorite_count || (chefSt && chefSt.state) || 0) || 0;
-        partners.push({ source: "chefkoch", folders: chefFolders });
+        partners.push({
+          source: "chefkoch",
+          folders: chefFolders,
+          entity: chefEnt,
+        });
         labels.push("Chefkoch");
       }
       const joined = partners.length > 0;
@@ -1165,7 +1203,10 @@
                         folderForSource = sec.fwlFolderId || "";
                       }
                     }
-                    return favoriteRecipeRow(r, folderForSource);
+                    return favoriteRecipeRow(r, folderForSource, {
+                      canPlan:
+                        r.source !== "chefkoch" ? true : chefCanPlan,
+                    });
                   })
                   .join("")
               : "";
@@ -1275,20 +1316,40 @@
           );
           if (!name) return;
           newFolderBtn.disabled = true;
+          const results = [];
           try {
             await this._hass.callService("foodwithlove", "create_favorite_folder", {
               name,
             });
-            for (const partner of partners) {
+            results.push("FWL: ok");
+          } catch (err) {
+            console.error("create folder failed", err);
+            window.alert("FWL-Ordner konnte nicht angelegt werden.");
+            newFolderBtn.disabled = false;
+            return;
+          }
+          for (const partner of partners) {
+            if (!partnerEntityAvailable(this._hass, partner.entity)) {
+              results.push(`${partner.source}: übersprungen (nicht verfügbar)`);
+              continue;
+            }
+            try {
               await this._hass.callService(
                 collectionsDomain(partner.source),
                 "create_favorite_folder",
                 { name }
               );
+              results.push(`${partner.source}: ok`);
+            } catch (err) {
+              console.error("create partner folder failed", partner.source, err);
+              results.push(`${partner.source}: fehlgeschlagen`);
             }
-          } catch (err) {
-            console.error("create folder failed", err);
-            window.alert("Ordner konnte nicht angelegt werden.");
+          }
+          const failed = results.filter((r) => r.includes("fehlgeschlagen"));
+          if (failed.length) {
+            window.alert(
+              "Ordner teilweise angelegt:\n" + results.join("\n")
+            );
           }
           newFolderBtn.disabled = false;
         });
@@ -1367,6 +1428,12 @@
           const recipeId = btn.getAttribute("data-recipe-id") || "";
           const recipeTitle = btn.getAttribute("data-title") || "Rezept";
           const source = btn.getAttribute("data-source") || "fwl";
+          if (source === "chefkoch" && !chefCanPlan) {
+            window.alert(
+              "Chefkoch-Wochenplaner benötigt Chefkoch Plus (meal planner)."
+            );
+            return;
+          }
           const day = await pickDate(`„${recipeTitle}“ planen`);
           if (!day || !recipeId) return;
           btn.disabled = true;
@@ -1378,7 +1445,11 @@
             );
           } catch (err) {
             console.error("add weekplan meal failed", err);
-            window.alert("Konnte nicht zum Wochenplan hinzufügen.");
+            window.alert(
+              source === "chefkoch"
+                ? "Konnte nicht zum Chefkoch-Wochenplan hinzufügen (Plus erforderlich?)."
+                : "Konnte nicht zum Wochenplan hinzufügen."
+            );
             btn.disabled = false;
             return;
           }
