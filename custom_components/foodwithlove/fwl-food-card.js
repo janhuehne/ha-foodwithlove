@@ -4,10 +4,18 @@
  * Desktop: open HA recipe viewer in an overlay (fallback: new tab).
  */
 (() => {
+  const CARD_VERSION = "0.5.20";
   const CARD_TAG = "fwl-food-card";
   const WEEK_TAG = "fwl-week-card";
   const RECIPE_TAG = "fwl-recipe-card";
   const FAV_TAG = "fwl-favorites-card";
+  // Helps confirm the browser actually loaded this build (not a stale module).
+  try {
+    window.__fwlFoodCardVersion = CARD_VERSION;
+    console.info(`[foodwithlove] fwl-food-card ${CARD_VERSION}`);
+  } catch (_err) {
+    /* ignore */
+  }
 
   function preferApp() {
     const ua = navigator.userAgent || "";
