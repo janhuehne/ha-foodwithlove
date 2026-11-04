@@ -17,10 +17,12 @@ Unofficial Home Assistant integration for **[food with love](https://www.foodwit
 | Morning greeting | no | Daily greeting text |
 | Week overview | Magic Link | Mon–Sun meal plan with images and smart open links |
 | Week plan calendar | Magic Link | Create / delete planned meals |
+| Move week plan meal | Magic Link | Drag handle or calendar button on week card (add then remove; FWL / Cookidoo / Chefkoch) |
 | Remove from week plan | Magic Link | Service `foodwithlove.remove_weekplan_meal` + × on week card |
 | Add to week plan | Magic Link | Service `foodwithlove.add_weekplan_meal` + + on favorites |
 | Favorites | Magic Link | Collapsible folders (`custom:fwl-favorites-card`); move / create / delete empty |
 | Favorite folders | Magic Link | Services `create_favorite_folder`, `delete_favorite_folder`, `move_favorite` |
+| Chefkoch private recipes | — | Favorites card **+ Rezept** → `chefkoch_collections.create_private_recipe` (name, description, folder) |
 | Shopping list todo | Magic Link | Check off / delete syncs back to FWL |
 | Options | — | Poll interval, calendar window |
 | Diagnostics / reauth | — | Redacted diagnostics; Magic Link when the token expires |
@@ -101,7 +103,7 @@ cookidoo_entity: sensor.cookidoo_collections_favoriten
 chefkoch_entity: sensor.chefkoch_collections_favoriten
 ```
 
-Folders are merged by name; add / move / remove / create-folder actions route by recipe source.
+Folders are merged by name; add / move / remove / create-folder actions route by recipe source. On the week card, meals can be moved between days (drag handle or date picker); the action stays on the meal’s source.
 
 Also useful:
 

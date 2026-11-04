@@ -4,7 +4,7 @@
  * Desktop: open HA recipe viewer in an overlay (fallback: new tab).
  */
 (() => {
-  const CARD_VERSION = "0.5.22";
+  const CARD_VERSION = "0.5.31";
   const CARD_TAG = "fwl-food-card";
   const WEEK_TAG = "fwl-week-card";
   const RECIPE_TAG = "fwl-recipe-card";
@@ -74,14 +74,20 @@
     }
   }
 
-  /** Allowlisted Chefkoch recipe deep links (joined favorites). */
+  /** Allowlisted Chefkoch recipe deep links (public + private cookbook). */
   function safeChefkochUrl(url) {
     if (!url) return null;
     try {
       const u = new URL(String(url));
       if (u.protocol !== "https:") return null;
       if (!CHEFKOCH_HOST_RE.test(u.hostname)) return null;
-      if (!/^\/rezepte\//i.test(u.pathname)) return null;
+      // Public: /rezepte/<id>/… — private: /mein-kochbuch/privatrezepte/<user-uuid>
+      if (
+        !/^\/rezepte\//i.test(u.pathname) &&
+        !/^\/mein-kochbuch\/privatrezepte\/user-[a-f0-9-]+\/?$/i.test(u.pathname)
+      ) {
+        return null;
+      }
       return u.toString();
     } catch (_err) {
       return null;
@@ -92,6 +98,62 @@
     if (source === "cookidoo") return "cookidoo_collections";
     if (source === "chefkoch") return "chefkoch_collections";
     return "foodwithlove";
+  }
+
+  /** Build add/remove_weekplan_meal service data for a meal identity. */
+  function weekplanServiceData({ source, date, key, custom }) {
+    const data = { date };
+    if (source === "cookidoo" || source === "chefkoch") {
+      data.recipe_id = key;
+    } else {
+      data.custom = !!custom;
+      if (custom) data.title = key;
+      else data.recipe_id = key;
+    }
+    return data;
+  }
+
+  /**
+   * Move a planned meal: add on toDate first, then remove on fromDate.
+   * Add-first avoids losing the meal if the second call fails (same recipe may
+   * briefly exist on both days).
+   */
+  async function moveWeekplanMeal(
+    hass,
+    { source, fromDate, toDate, key, custom }
+  ) {
+    if (!hass || !fromDate || !toDate || !key || fromDate === toDate) {
+      return false;
+    }
+    const domain = collectionsDomain(source || "fwl");
+    const removeData = weekplanServiceData({
+      source,
+      date: fromDate,
+      key,
+      custom,
+    });
+    const addData = weekplanServiceData({
+      source,
+      date: toDate,
+      key,
+      custom,
+    });
+    console.info("[foodwithlove] move weekplan", {
+      domain,
+      fromDate,
+      toDate,
+      key,
+      custom: !!custom,
+    });
+    await hass.callService(domain, "add_weekplan_meal", addData);
+    try {
+      await hass.callService(domain, "remove_weekplan_meal", removeData);
+    } catch (err) {
+      // Target day already has the meal; leave it there and surface the error.
+      console.error("weekplan move remove-from-source failed", err);
+      throw err;
+    }
+    return true;
   }
 
   async function fetchRecipeHtml(hass, viewerUrl) {
@@ -355,20 +417,57 @@
     </button>`;
   }
 
+  function moveIconButton(attrs) {
+    return `<button type="button" class="fwl-move fwl-icon-btn" title="Auf anderen Tag verschieben" aria-label="Verschieben" ${attrs}>
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2"/>
+        <path d="M16 2v4M8 2v4M3 10h18"/>
+        <path d="M8 14h8M14 14l-2-2 2-2"/>
+      </svg>
+    </button>`;
+  }
+
+  function mealActionAttrs(date, key, custom, source, title) {
+    return (
+      `data-date="${esc(date)}" data-key="${esc(key)}" data-custom="${custom}" ` +
+      `data-source="${esc(source)}" data-title="${esc(title || "")}"`
+    );
+  }
+
   function mealRow(meal, dayDate) {
     const date = meal.date || dayDate || "";
     const source = meal.source || "fwl";
     const custom = meal.custom ? "1" : "0";
     const key = meal.custom ? meal.title || "" : meal.recipe_id || "";
-    const remove =
-      date && key
-        ? `<button type="button" class="fwl-remove" title="Aus Wochenplan entfernen" aria-label="Entfernen" data-date="${esc(date)}" data-key="${esc(key)}" data-custom="${custom}" data-source="${esc(source)}" data-title="${esc(meal.title || "")}">×</button>`
-        : "";
+    const title = meal.title || "";
+    const attrs = mealActionAttrs(date, key, custom, source, title);
+    const canAct = Boolean(date && key);
+    const remove = canAct
+      ? `<button type="button" class="fwl-remove" title="Aus Wochenplan entfernen" aria-label="Entfernen" ${attrs}>×</button>`
+      : "";
+    const move = canAct ? moveIconButton(attrs) : "";
     const openBtn =
       meal.app_url || meal.viewer_url
         ? openIconButton(meal.app_url, meal.viewer_url)
         : "";
-    return `<div class="fwl-meal">${mealMain(meal, 72)}${openBtn}${remove}</div>`;
+    // Grip starts HTML5 drag (open/move/remove are buttons and block parent drag).
+    const grip = canAct
+      ? `<span class="fwl-drag-handle" title="Auf anderen Tag ziehen" aria-label="Ziehen" ${attrs}>⠿</span>`
+      : "";
+    const dragAttrs = canAct
+      ? `draggable="true" ${attrs}`
+      : "";
+    return `<div class="fwl-meal"${dragAttrs ? ` ${dragAttrs}` : ""}>${grip}${mealMain(meal, 72)}${openBtn}${move}${remove}</div>`;
+  }
+
+  function mealIdentityFromEl(el) {
+    return {
+      fromDate: el.getAttribute("data-date") || "",
+      key: el.getAttribute("data-key") || "",
+      custom: el.getAttribute("data-custom") === "1",
+      source: el.getAttribute("data-source") || "fwl",
+      title: el.getAttribute("data-title") || "Rezept",
+    };
   }
 
   function bindOpens(root, hass) {
@@ -389,30 +488,191 @@
       btn.addEventListener("click", async (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        const title = btn.getAttribute("data-title") || "Rezept";
+        const { title, key, fromDate: date, source, custom } =
+          mealIdentityFromEl(btn);
         if (!window.confirm(`„${title}“ aus dem Wochenplan entfernen?`)) {
           return;
-        }
-        const custom = btn.getAttribute("data-custom") === "1";
-        const key = btn.getAttribute("data-key") || "";
-        const date = btn.getAttribute("data-date") || "";
-        const source = btn.getAttribute("data-source") || "fwl";
-        const data = { date };
-        if (source === "cookidoo" || source === "chefkoch") {
-          data.recipe_id = key;
-        } else {
-          data.custom = custom;
-          if (custom) data.title = key;
-          else data.recipe_id = key;
         }
         btn.disabled = true;
         try {
           const domain = collectionsDomain(source);
-          await hass.callService(domain, "remove_weekplan_meal", data);
+          await hass.callService(
+            domain,
+            "remove_weekplan_meal",
+            weekplanServiceData({ source, date, key, custom })
+          );
         } catch (err) {
           console.error("remove weekplan meal failed", err);
           window.alert("Konnte nicht entfernt werden.");
           btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  function setMealBusy(mealEl, busy) {
+    if (!mealEl) return;
+    mealEl.classList.toggle("is-busy", !!busy);
+    mealEl.querySelectorAll("button").forEach((b) => {
+      b.disabled = !!busy;
+    });
+  }
+
+  function bindMoves(root, hass, card, { chefCanPlan } = {}) {
+    root.querySelectorAll("button.fwl-move").forEach((btn) => {
+      btn.addEventListener("click", async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const ident = mealIdentityFromEl(btn);
+        if (!ident.key || !ident.fromDate) return;
+        if (ident.source === "chefkoch" && chefCanPlan === false) {
+          window.alert(
+            "Chefkoch-Wochenplaner benötigt Chefkoch Plus (meal planner)."
+          );
+          return;
+        }
+        const day = await pickDate(`„${ident.title}“ verschieben`);
+        if (!day || day === ident.fromDate) return;
+        const mealEl = btn.closest(".fwl-meal");
+        setMealBusy(mealEl, true);
+        if (card) card._moving = true;
+        try {
+          await moveWeekplanMeal(hass, {
+            source: ident.source,
+            fromDate: ident.fromDate,
+            toDate: day,
+            key: ident.key,
+            custom: ident.custom,
+          });
+          if (card) {
+            card._moving = false;
+            card._partnerKey = "";
+            card._loadPartnerMeals().finally(() => card._render());
+          }
+        } catch (err) {
+          console.error("move weekplan meal failed", err);
+          const detail = err && (err.message || String(err));
+          window.alert(
+            ident.source === "chefkoch"
+              ? "Konnte nicht verschieben (Plus erforderlich?)."
+              : `Konnte nicht verschieben.${detail ? `\n${detail}` : ""}`
+          );
+          setMealBusy(mealEl, false);
+          if (card) card._moving = false;
+        }
+      });
+    });
+  }
+
+  function bindDayDnD(root, hass, card, { chefCanPlan } = {}) {
+    // Prefer in-memory drag state: HA Lovelace / shadow DOM often drops
+    // dataTransfer payloads for custom MIME types.
+    root.querySelectorAll(".fwl-meal[draggable='true']").forEach((mealEl) => {
+      mealEl.addEventListener("dragstart", (ev) => {
+        const fromBtn =
+          ev.target && ev.target.closest && ev.target.closest("button");
+        const fromHandle =
+          ev.target &&
+          ev.target.closest &&
+          ev.target.closest(".fwl-drag-handle");
+        // Allow drag from the grip (or non-button chrome); block from action buttons.
+        if (fromBtn && !fromHandle) {
+          ev.preventDefault();
+          return;
+        }
+        const ident = mealIdentityFromEl(mealEl);
+        if (!ident.key || !ident.fromDate) {
+          ev.preventDefault();
+          return;
+        }
+        if (card) card._draggingMeal = { ...ident };
+        try {
+          ev.dataTransfer.setData("text/plain", JSON.stringify(ident));
+          ev.dataTransfer.effectAllowed = "move";
+        } catch (_err) {
+          /* ignore */
+        }
+        mealEl.classList.add("is-dragging");
+      });
+      mealEl.addEventListener("dragend", () => {
+        mealEl.classList.remove("is-dragging");
+        root.querySelectorAll(".fwl-day.is-drop-target").forEach((d) => {
+          d.classList.remove("is-drop-target");
+        });
+        if (card) card._draggingMeal = null;
+      });
+    });
+
+    root.querySelectorAll(".fwl-day[data-date]").forEach((dayEl) => {
+      dayEl.addEventListener("dragover", (ev) => {
+        ev.preventDefault();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+        dayEl.classList.add("is-drop-target");
+      });
+      dayEl.addEventListener("dragleave", (ev) => {
+        if (!dayEl.contains(ev.relatedTarget)) {
+          dayEl.classList.remove("is-drop-target");
+        }
+      });
+      dayEl.addEventListener("drop", async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        dayEl.classList.remove("is-drop-target");
+        const toDate = dayEl.getAttribute("data-date") || "";
+        let ident = card && card._draggingMeal ? { ...card._draggingMeal } : null;
+        if (!ident) {
+          const raw =
+            (ev.dataTransfer && ev.dataTransfer.getData("text/plain")) || "";
+          try {
+            ident = JSON.parse(raw);
+          } catch (_err) {
+            ident = null;
+          }
+        }
+        if (card) card._draggingMeal = null;
+        if (!ident || !ident.key || !ident.fromDate || !toDate) {
+          console.warn("[foodwithlove] drop ignored; missing meal/date", {
+            ident,
+            toDate,
+          });
+          return;
+        }
+        if (ident.fromDate === toDate) return;
+        if (ident.source === "chefkoch" && chefCanPlan === false) {
+          window.alert(
+            "Chefkoch-Wochenplaner benötigt Chefkoch Plus (meal planner)."
+          );
+          return;
+        }
+        const mealEl =
+          root.querySelector(
+            `.fwl-meal[data-date="${CSS.escape(ident.fromDate)}"][data-key="${CSS.escape(ident.key)}"][data-source="${CSS.escape(ident.source || "fwl")}"]`
+          ) || null;
+        setMealBusy(mealEl, true);
+        if (card) card._moving = true;
+        try {
+          await moveWeekplanMeal(hass, {
+            source: ident.source || "fwl",
+            fromDate: ident.fromDate,
+            toDate,
+            key: ident.key,
+            custom: !!ident.custom,
+          });
+          if (card) {
+            card._moving = false;
+            card._partnerKey = "";
+            card._loadPartnerMeals().finally(() => card._render());
+          }
+        } catch (err) {
+          console.error("move weekplan meal (dnd) failed", err);
+          const detail = err && (err.message || String(err));
+          window.alert(
+            ident.source === "chefkoch"
+              ? "Konnte nicht verschieben (Plus erforderlich?)."
+              : `Konnte nicht verschieben.${detail ? `\n${detail}` : ""}`
+          );
+          setMealBusy(mealEl, false);
+          if (card) card._moving = false;
         }
       });
     });
@@ -431,7 +691,12 @@
 
     set hass(hass) {
       this._hass = hass;
-      this._loadPartnerMeals().finally(() => this._render());
+      // Avoid wiping in-flight drag/move UI on every state push.
+      if (this._moving || this._draggingMeal) return;
+      this._loadPartnerMeals().finally(() => {
+        if (this._moving || this._draggingMeal) return;
+        this._render();
+      });
     }
 
     getCardSize() {
@@ -605,6 +870,20 @@
       });
     }
 
+    _chefCanPlan() {
+      if (!this._hass) return true;
+      const chefEnt = findCollectionsEntity(
+        this._hass,
+        "chefkoch",
+        this._config.chefkoch_entity || "",
+        this._config.entity || ""
+      );
+      if (!chefEnt) return true;
+      const st = this._hass.states[chefEnt];
+      if (!st || !st.attributes) return true;
+      return !!st.attributes.has_meal_planner;
+    }
+
     _render() {
       if (!this._hass || !this._config) return;
       const days = this._mergedDays();
@@ -616,22 +895,47 @@
         body = days
           .map((d) => {
             const label = esc(d.label || "");
+            const date = esc(d.date || "");
             const head = d.is_today
-              ? `<h3 style="margin:1rem 0 .35rem;">${label}</h3>`
-              : `<div style="margin:1rem 0 .35rem;font-weight:600;">${label}</div>`;
-            if (d.empty) {
-              return `${head}<div style="opacity:.7;">Keine Rezepte</div>`;
-            }
-            const meals = (d.meals || [])
-              .map((m) => mealRow(m, d.date))
-              .join("");
-            return `${head}${meals}`;
+              ? `<h3 class="fwl-day-label">${label}</h3>`
+              : `<div class="fwl-day-label">${label}</div>`;
+            const meals = d.empty
+              ? `<div class="fwl-day-empty">Keine Rezepte</div>`
+              : (d.meals || []).map((m) => mealRow(m, d.date)).join("");
+            return `<div class="fwl-day" data-date="${date}">${head}<div class="fwl-day-body">${meals}</div></div>`;
           })
           .join("");
       }
       root.innerHTML = `
         <ha-card>
           <style>${sharedRowStyles()}
+            .fwl-day {
+              margin: .35rem 0 .85rem;
+              padding: .35rem .55rem .55rem;
+              border-radius: 10px;
+              border: 1px dashed transparent;
+              transition: background .12s ease, border-color .12s ease;
+            }
+            .fwl-day-label {
+              margin: .35rem 0 .35rem;
+              font-weight: 600;
+            }
+            h3.fwl-day-label { font-size: 1.05rem; }
+            .fwl-day-empty { opacity: .7; min-height: 2.25rem; display: flex; align-items: center; }
+            .fwl-day.is-drop-target {
+              background: color-mix(in srgb, var(--primary-color, #03a9f4) 12%, transparent);
+              border-color: var(--primary-color, #03a9f4);
+            }
+            .fwl-meal[draggable="true"] { cursor: grab; }
+            .fwl-drag-handle {
+              flex: 0 0 auto; width: 1.1rem; text-align: center;
+              color: var(--secondary-text-color); opacity: .55;
+              cursor: grab; user-select: none; font-size: .95rem; line-height: 1;
+              padding: .2rem 0;
+            }
+            .fwl-drag-handle:hover { opacity: .95; }
+            .fwl-meal.is-dragging { opacity: .45; }
+            .fwl-meal.is-busy { opacity: .55; pointer-events: none; }
             button.fwl-remove {
               appearance: none; border: 1px solid var(--divider-color, #ddd);
               background: transparent; color: var(--secondary-text-color);
@@ -639,15 +943,18 @@
               font-size: 1.1rem; line-height: 1; cursor: pointer; flex: 0 0 auto;
             }
             button.fwl-remove:hover { color: var(--error-color, #c62828); border-color: currentColor; }
-            button.fwl-remove:disabled { opacity: .4; cursor: wait; }
+            button.fwl-remove:disabled, button.fwl-move:disabled { opacity: .4; cursor: wait; }
           </style>
           <div style="padding:12px 16px 16px;">
             ${this._config.title ? `<h2 style="margin:0 0 .5rem;font-size:1.1rem;">${esc(this._config.title)}</h2>` : ""}
             ${body}
           </div>
         </ha-card>`;
+      const moveOpts = { chefCanPlan: this._chefCanPlan() };
       bindOpens(root, this._hass);
       bindRemoves(root, this._hass);
+      bindMoves(root, this._hass, this, moveOpts);
+      bindDayDnD(root, this._hass, this, moveOpts);
     }
   }
 
@@ -699,12 +1006,68 @@
     `;
   }
 
+  function todayRecipeFromEntity(hass, entityId, sourceLabel) {
+    if (!hass || !entityId) return null;
+    const st = hass.states[entityId];
+    if (!st || st.state == null || st.state === "" || st.state === "unknown" || st.state === "unavailable") {
+      return null;
+    }
+    const attrs = st.attributes || {};
+    const img = safeHttpsUrl(
+      attrs.thumb_url || attrs.entity_picture || attrs.image_url || ""
+    );
+    const metaBits = [];
+    if (attrs.preparation_time != null && attrs.preparation_time !== "") {
+      metaBits.push(`${attrs.preparation_time} min`);
+    }
+    if (attrs.rating != null && attrs.rating !== "") {
+      const votes =
+        attrs.rating_count != null && attrs.rating_count !== ""
+          ? ` (${attrs.rating_count})`
+          : "";
+      metaBits.push(`★ ${attrs.rating}${votes}`);
+    }
+    return {
+      source: sourceLabel,
+      title: String(st.state),
+      img,
+      meta: metaBits.join(" · "),
+      app_url: attrs.app_url || null,
+      viewer_url: attrs.viewer_url || null,
+      content: stripHtml(String(attrs.content || "").replace(/<br\s*\/?>/gi, " ")),
+    };
+  }
+
+  function compactTodayTile(item) {
+    if (!item) return "";
+    const canOpen = item.app_url || item.viewer_url;
+    const body = `
+      ${
+        item.img
+          ? `<img class="thumb" src="${esc(item.img)}" alt="" loading="eager" decoding="async" />`
+          : `<span class="thumb empty"></span>`
+      }
+      <span class="text">
+        <span class="src">${esc(item.source)}</span>
+        <span class="name">${esc(item.title)}</span>
+        ${item.meta ? `<span class="meta">${esc(item.meta)}</span>` : ""}
+      </span>`;
+    if (canOpen) {
+      return `<button type="button" class="fwl-open fwl-today-tile" ${openDataAttrs(
+        item.app_url,
+        item.viewer_url
+      )} title="${esc(openHint())}">${body}</button>`;
+    }
+    return `<div class="fwl-today-tile">${body}</div>`;
+  }
+
   class FwlRecipeCard extends HTMLElement {
     setConfig(config) {
       this._config = config || {};
       if (!this._config.entity) {
         throw new Error("entity is required");
       }
+      this._todaySig = this._todaySig || "";
     }
 
     set hass(hass) {
@@ -713,58 +1076,117 @@
     }
 
     getCardSize() {
-      return 4;
+      return 5;
+    }
+
+    _collectTodayItems() {
+      const items = [];
+      const fwl = todayRecipeFromEntity(
+        this._hass,
+        this._config.entity,
+        "FWL"
+      );
+      if (fwl) items.push(fwl);
+      const cookEnt =
+        this._config.cookidoo_entity ||
+        "sensor.cookidoo_collections_rezept_des_tages";
+      const chefEnt =
+        this._config.chefkoch_entity ||
+        "sensor.chefkoch_collections_rezept_des_tages";
+      // Only auto-include partners when the entity exists (or was configured).
+      if (this._config.cookidoo_entity || this._hass.states[cookEnt]) {
+        const cook = todayRecipeFromEntity(this._hass, cookEnt, "Cookidoo");
+        if (cook) items.push(cook);
+      }
+      if (this._config.chefkoch_entity || this._hass.states[chefEnt]) {
+        const chef = todayRecipeFromEntity(this._hass, chefEnt, "Chefkoch");
+        if (chef) items.push(chef);
+      }
+      return items;
     }
 
     _render() {
       if (!this._hass || !this._config) return;
-      const st = this._hass.states[this._config.entity];
+      const items = this._collectTodayItems();
       const gEnt = this._config.greeting_entity;
-      const greeting = gEnt && this._hass.states[gEnt] ? this._hass.states[gEnt].state : "";
-      const attrs = (st && st.attributes) || {};
-      const title = st ? st.state : "";
-      const img = safeHttpsUrl(
-        attrs.thumb_url || attrs.entity_picture || attrs.image_url || ""
-      );
-      const metaBits = [];
-      if (attrs.preparation_time != null && attrs.preparation_time !== "") {
-        metaBits.push(`${attrs.preparation_time} min`);
+      const greeting =
+        gEnt && this._hass.states[gEnt] ? this._hass.states[gEnt].state : "";
+      // Long FWL blurb only when showing a single FWL tile (legacy layout).
+      const content =
+        items.length === 1 && items[0].source === "FWL" ? items[0].content : "";
+      const title = this._config.title || "Rezept des Tages";
+      // Skip DOM rebuild when nothing visible changed — full innerHTML
+      // replaces <img> nodes and causes constant photo flicker on hass ticks.
+      const sig = JSON.stringify({
+        title,
+        greeting,
+        content,
+        items: items.map((it) => [
+          it.source,
+          it.title,
+          it.img,
+          it.meta,
+          it.app_url,
+          it.viewer_url,
+        ]),
+      });
+      if (sig === this._todaySig && this.shadowRoot && this.shadowRoot.firstChild) {
+        return;
       }
-      if (attrs.rating != null && attrs.rating !== "") {
-        const votes =
-          attrs.rating_count != null && attrs.rating_count !== ""
-            ? ` (${attrs.rating_count})`
-            : "";
-        metaBits.push(`★ ${attrs.rating}${votes}`);
-      }
-      const content = stripHtml(
-        String(attrs.content || "")
-          .replace(/<br\s*\/?>/gi, " ")
-      );
-      const canOpen = attrs.app_url || attrs.viewer_url;
+      this._todaySig = sig;
+
       const root = this.shadowRoot || this.attachShadow({ mode: "open" });
-      const head = canOpen
-        ? `<button type="button" class="fwl-open fwl-today" ${openDataAttrs(attrs.app_url, attrs.viewer_url)} title="${esc(openHint())}">
-            ${img ? `<img src="${esc(img)}" alt="" width="120" style="width:120px;max-width:120px;height:auto;border-radius:10px;" />` : ""}
-            <h3 style="margin:.5rem 0 .25rem;">${esc(title)}</h3>
-          </button>`
-        : `${img ? `<img src="${esc(img)}" alt="" width="120" style="width:120px;max-width:120px;height:auto;border-radius:10px;" />` : ""}
-           <h3 style="margin:.5rem 0 .25rem;">${esc(title)}</h3>`;
+      const grid = items.map(compactTodayTile).join("");
       root.innerHTML = `
         <ha-card>
           <style>
-            button.fwl-today {
-              appearance: none; border: 0; background: transparent; color: inherit;
-              font: inherit; text-align: left; cursor: pointer; display: block; padding: 0; width: 100%;
+            .pad { padding: 10px 12px 12px; }
+            .head {
+              display: flex; align-items: baseline; justify-content: space-between;
+              gap: .5rem; margin-bottom: .55rem;
             }
-            button.fwl-today:hover h3 { text-decoration: underline; }
+            .head h2 { margin: 0; font-size: 1.05rem; }
+            .grid {
+              display: flex; flex-direction: column; gap: .45rem;
+            }
+            button.fwl-today-tile, .fwl-today-tile {
+              appearance: none; border: 1px solid var(--divider-color, #3333);
+              background: transparent; color: inherit; font: inherit;
+              text-align: left; cursor: pointer; display: flex; flex-direction: row;
+              align-items: center; gap: .7rem; padding: .45rem .55rem;
+              border-radius: 10px; width: 100%; box-sizing: border-box; min-width: 0;
+            }
+            button.fwl-today-tile:hover { border-color: var(--primary-color, #03a9f4); }
+            .fwl-today-tile .thumb {
+              width: 72px; height: 72px; flex: 0 0 72px; object-fit: cover;
+              border-radius: 8px; background: var(--divider-color, #eee);
+              display: block;
+            }
+            .fwl-today-tile .thumb.empty { width: 72px; height: 72px; }
+            .fwl-today-tile .text {
+              display: flex; flex-direction: column; gap: .15rem; min-width: 0; flex: 1;
+            }
+            .fwl-today-tile .src {
+              font-size: .7rem; font-weight: 700; letter-spacing: .02em;
+              text-transform: uppercase; opacity: .7;
+            }
+            .fwl-today-tile .name {
+              font-weight: 650; font-size: .95rem; line-height: 1.3;
+              display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+              overflow: hidden;
+            }
+            .fwl-today-tile .meta { opacity: .75; font-size: .8rem; }
+            .greeting { font-style: italic; margin-top: .65rem; opacity: .85; font-size: .9rem; }
+            .blurb { margin-top: .55rem; line-height: 1.4; font-size: .9rem; opacity: .9;
+              display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
           </style>
-          <div style="padding:12px 16px 16px;">
-            ${this._config.title ? `<h2 style="margin:0 0 .5rem;font-size:1.1rem;">${esc(this._config.title)}</h2>` : ""}
-            ${head}
-            ${metaBits.length ? `<div style="opacity:.8;margin-bottom:.5rem;">${esc(metaBits.join(" · "))}</div>` : ""}
-            ${greeting ? `<div style="font-style:italic;margin-bottom:.75rem;">${esc(greeting)}</div>` : ""}
-            ${content ? `<div style="margin-bottom:.75rem;line-height:1.45;">${esc(content)}</div>` : ""}
+          <div class="pad">
+            <div class="head">
+              <h2>${esc(title)}</h2>
+            </div>
+            ${items.length ? `<div class="grid">${grid}</div>` : "<em>Kein Rezept des Tages</em>"}
+            ${greeting ? `<div class="greeting">${esc(greeting)}</div>` : ""}
+            ${content ? `<div class="blurb">${esc(content)}</div>` : ""}
           </div>
         </ha-card>`;
       bindOpens(root, this._hass);
@@ -900,6 +1322,107 @@
     });
   }
 
+  /** Chefkoch private recipe: name + description + collection. */
+  function promptPrivateRecipe(title, folders) {
+    return new Promise((resolve) => {
+      const existing = document.getElementById("fwl-private-recipe-prompt");
+      if (existing) existing.remove();
+
+      const fieldStyle =
+        "width:100%;font:inherit;padding:.5rem;border-radius:8px;" +
+        "border:1px solid var(--divider-color,#ccc);margin-bottom:.75rem;" +
+        "background:transparent;color:inherit;box-sizing:border-box;";
+
+      const backdrop = document.createElement("div");
+      backdrop.id = "fwl-private-recipe-prompt";
+      backdrop.style.cssText =
+        "position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);" +
+        "display:flex;align-items:center;justify-content:center;padding:1rem;";
+
+      const panel = document.createElement("div");
+      panel.style.cssText =
+        "background:var(--card-background-color,#fff);color:var(--primary-text-color);" +
+        "border-radius:12px;padding:1rem 1.1rem;min-width:min(340px,100%);" +
+        "box-shadow:0 12px 40px rgba(0,0,0,.35);";
+
+      const heading = document.createElement("div");
+      heading.style.cssText = "font-weight:650;margin-bottom:.75rem;";
+      heading.textContent = title || "Privates Rezept anlegen";
+
+      const nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.placeholder = "Name";
+      nameInput.maxLength = 120;
+      nameInput.style.cssText = fieldStyle;
+
+      const descInput = document.createElement("textarea");
+      descInput.placeholder = "Beschreibung (optional)";
+      descInput.rows = 4;
+      descInput.style.cssText = fieldStyle + "resize:vertical;min-height:5rem;";
+
+      const select = document.createElement("select");
+      select.style.cssText = fieldStyle;
+      const folderOptions = [
+        { id: "", name: "Hauptsammlung" },
+        ...(folders || []).map((f) => ({
+          id: f.id,
+          name: f.name || "Ordner",
+        })),
+      ];
+      for (const opt of folderOptions) {
+        const el = document.createElement("option");
+        el.value = opt.id;
+        el.textContent = opt.name;
+        select.append(el);
+      }
+
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;justify-content:flex-end;gap:.5rem;";
+
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Abbrechen";
+      cancel.style.cssText = buttonStyle();
+      const ok = document.createElement("button");
+      ok.type = "button";
+      ok.textContent = "Anlegen";
+      ok.style.cssText = buttonStyle(true);
+
+      const close = (value) => {
+        backdrop.remove();
+        resolve(value);
+      };
+      cancel.addEventListener("click", () => close(null));
+      backdrop.addEventListener("click", (ev) => {
+        if (ev.target === backdrop) close(null);
+      });
+      ok.addEventListener("click", () => {
+        const name = (nameInput.value || "").trim();
+        if (!name) {
+          nameInput.focus();
+          return;
+        }
+        close({
+          name,
+          description: (descInput.value || "").trim(),
+          folderId: select.value || "",
+        });
+      });
+      nameInput.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          ok.click();
+        }
+      });
+
+      row.append(cancel, ok);
+      panel.append(heading, nameInput, descInput, select, row);
+      backdrop.append(panel);
+      document.body.append(backdrop);
+      nameInput.focus();
+    });
+  }
+
   function pickFolder(title, folders, currentId, optionsCfg) {
     return new Promise((resolve) => {
       const existing = document.getElementById("fwl-folder-picker");
@@ -1000,6 +1523,45 @@
       hauptgericht: "hauptgericht",
     };
     return aliases[raw] || raw;
+  }
+
+  function normalizeSearch(text) {
+    return String(text || "")
+      .toLocaleLowerCase("de")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  }
+
+  function recipeMatchesQuery(recipe, queryNorm) {
+    if (!queryNorm) return true;
+    return normalizeSearch(recipe && recipe.title).includes(queryNorm);
+  }
+
+  function filterFavoriteSections(sections, query) {
+    const q = normalizeSearch(query);
+    if (!q) {
+      return { sections, matchCount: null, active: false };
+    }
+    let matchCount = 0;
+    const filtered = [];
+    for (const sec of sections || []) {
+      const folderHit = normalizeSearch(sec.name).includes(q);
+      const recipeHits = (sec.recipes || []).filter((r) =>
+        recipeMatchesQuery(r, q)
+      );
+      if (!folderHit && !recipeHits.length) continue;
+      // Folder name match → keep all recipes; otherwise only title hits.
+      const shown = folderHit ? sec.recipes || [] : recipeHits;
+      matchCount += shown.length;
+      filtered.push({
+        ...sec,
+        recipes: shown,
+        count: shown.length,
+        _searchHit: true,
+      });
+    }
+    return { sections: filtered, matchCount, active: true };
   }
 
   function folderDisplayName(key, preferred) {
@@ -1105,6 +1667,7 @@
       this._chefPayloadKey = this._chefPayloadKey || "";
       this._chefLoading = false;
       this._chefError = "";
+      this._favQuery = this._favQuery || "";
     }
 
     set hass(hass) {
@@ -1427,31 +1990,40 @@
           "Chefkoch: API nicht erreichbar — Collections-Integration aktualisieren";
       }
       const joined = partners.length > 0 || primarySource === "chefkoch";
-      const sections = this._mergeFavoriteSections(
+      const allSections = this._mergeFavoriteSections(
         folders,
         uncategorized,
         partners,
         primarySource
       );
+      const search = filterFavoriteSections(allSections, this._favQuery || "");
+      const sections = search.sections;
 
       // Keep Chefkoch folders expanded until the user collapses them.
       this._userClosed = this._userClosed || new Set();
       if (chefPayloadOk) {
-        for (const sec of sections) {
+        for (const sec of allSections) {
           if (sec.chefCount > 0 && !this._userClosed.has(sec.id)) {
             this._open.add(sec.id);
           }
         }
       }
+      // While searching, expand every hit so matches are visible.
+      if (search.active) {
+        for (const sec of sections) {
+          this._open.add(sec.id);
+        }
+      }
 
-      const root = this.shadowRoot || this.attachShadow({ mode: "open" });
       let body;
-      if (!sections.length) {
+      if (!allSections.length) {
         body = "<em>Keine Favoriten</em>";
+      } else if (search.active && !sections.length) {
+        body = "<em>Keine Treffer</em>";
       } else {
         body = sections
           .map((sec) => {
-            const open = this._open.has(sec.id);
+            const open = search.active || this._open.has(sec.id);
             const chev = open ? "▾" : "▸";
             const recipes = open
               ? (sec.recipes || [])
@@ -1511,13 +2083,34 @@
       }
 
       const summary = joined
-        ? `${esc(total)} Favoriten (${esc(labels.join(" + "))})`
-        : `${esc(total)} Favoriten`;
-      const joinStatus = chefJoinWarn
-        ? `<div class="join-status warn">${esc(chefJoinWarn)}</div>`
-        : "";
-      root.innerHTML = `
-        <ha-card>
+        ? `${total} Favoriten (${labels.join(" + ")})`
+        : `${total} Favoriten`;
+      const searchHintText =
+        search.active && search.matchCount != null
+          ? `${search.matchCount} Treffer`
+          : "";
+      const showChefRecipeBtn =
+        chefPayloadOk ||
+        primarySource === "chefkoch" ||
+        partners.some((p) => p.source === "chefkoch");
+
+      // Context for once-bound header actions + per-render body handlers.
+      this._favCtx = {
+        chefFolders,
+        cookFolders,
+        folders,
+        partners,
+        labels,
+        joined,
+        chefCanPlan,
+      };
+
+      const root = this.shadowRoot || this.attachShadow({ mode: "open" });
+      // Keep the search <input> mounted — replacing innerHTML steals focus
+      // (document.activeElement is the host inside open shadow trees).
+      if (!root.querySelector("ha-card.fwl-fav-shell")) {
+        root.innerHTML = `
+        <ha-card class="fwl-fav-shell">
           <style>${sharedRowStyles()}
             .pad { padding: 12px 16px 16px; }
             .summary-row {
@@ -1530,14 +2123,33 @@
               color: var(--warning-color, #f44336);
               font-size: .85rem; font-weight: 600;
             }
-            button.fwl-new-folder {
+            .fwl-search-row { margin: 0 0 .65rem; }
+            input.fwl-fav-search {
+              width: 100%; font: inherit; padding: .45rem .65rem;
+              border-radius: 8px; border: 1px solid var(--divider-color, #ddd);
+              background: transparent; color: inherit; box-sizing: border-box;
+            }
+            input.fwl-fav-search:focus {
+              outline: none; border-color: var(--primary-color, #03a9f4);
+            }
+            .search-hint {
+              margin: -.35rem 0 .55rem; opacity: .7; font-size: .85rem;
+              min-height: 1.1em;
+            }
+            .search-hint:empty { display: none; }
+            .summary-actions { display: flex; gap: .35rem; flex: 0 0 auto; flex-wrap: wrap; }
+            button.fwl-new-folder, button.fwl-new-recipe {
               appearance: none; border: 1px solid var(--divider-color, #ddd);
               background: transparent; color: var(--primary-color, #03a9f4);
               border-radius: 8px; padding: .25rem .65rem; font: inherit; cursor: pointer;
               white-space: nowrap;
             }
-            button.fwl-new-folder:hover { border-color: currentColor; }
-            button.fwl-new-folder:disabled { opacity: .4; cursor: wait; }
+            button.fwl-new-folder:hover, button.fwl-new-recipe:hover {
+              border-color: currentColor;
+            }
+            button.fwl-new-folder:disabled, button.fwl-new-recipe:disabled {
+              opacity: .4; cursor: wait;
+            }
             .fwl-folder { border-top: 1px solid var(--divider-color, #3333); }
             .fwl-folder:first-of-type { border-top: 0; }
             .fwl-folder-row { display: flex; align-items: center; gap: .35rem; }
@@ -1569,29 +2181,78 @@
             }
           </style>
           <div class="pad">
-            ${this._config.title ? `<h2 style="margin:0 0 .35rem;font-size:1.1rem;">${esc(this._config.title)}</h2>` : ""}
+            <h2 class="fwl-fav-title" style="margin:0 0 .35rem;font-size:1.1rem;display:none;"></h2>
             <div class="summary-row">
-              <div class="summary">${summary}</div>
-              <button type="button" class="fwl-new-folder">+ Ordner</button>
+              <div class="summary"></div>
+              <div class="summary-actions">
+                <button type="button" class="fwl-new-recipe" hidden>+ Rezept</button>
+                <button type="button" class="fwl-new-folder">+ Ordner</button>
+              </div>
             </div>
-            ${joinStatus}
-            ${body}
+            <div class="fwl-search-row">
+              <input type="search" class="fwl-fav-search" placeholder="Favoriten suchen…"
+                autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="search-hint"></div>
+            <div class="join-status"></div>
+            <div class="fwl-fav-body"></div>
           </div>
         </ha-card>`;
 
-      root.querySelectorAll("button.fwl-folder-head").forEach((btn) => {
-        btn.addEventListener("click", () => this._toggle(btn.getAttribute("data-id")));
-      });
-      bindOpens(root, this._hass);
+        const searchInput = root.querySelector("input.fwl-fav-search");
+        searchInput.addEventListener("input", (ev) => {
+          this._favQuery = ev.target.value || "";
+          this._render();
+        });
+        searchInput.addEventListener("keydown", (ev) => {
+          if (ev.key === "Escape" && (this._favQuery || searchInput.value)) {
+            ev.preventDefault();
+            this._favQuery = "";
+            searchInput.value = "";
+            this._render();
+          }
+        });
 
-      const newFolderBtn = root.querySelector("button.fwl-new-folder");
-      if (newFolderBtn) {
+        const newRecipeBtn = root.querySelector("button.fwl-new-recipe");
+        newRecipeBtn.addEventListener("click", async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const ctx = this._favCtx || {};
+          const drafted = await promptPrivateRecipe(
+            "Privates Chefkoch-Rezept",
+            ctx.chefFolders || []
+          );
+          if (!drafted) return;
+          newRecipeBtn.disabled = true;
+          try {
+            const data = {
+              name: drafted.name,
+              description: drafted.description || "",
+            };
+            if (drafted.folderId) data.folder_id = drafted.folderId;
+            await this._hass.callService(
+              "chefkoch_collections",
+              "create_private_recipe",
+              data
+            );
+            this._chefPayloadKey = "";
+            await this._loadChefkochFavorites();
+            this._render();
+          } catch (err) {
+            console.error("create private recipe failed", err);
+            window.alert("Privates Rezept konnte nicht angelegt werden.");
+            newRecipeBtn.disabled = false;
+          }
+        });
+
+        const newFolderBtn = root.querySelector("button.fwl-new-folder");
         newFolderBtn.addEventListener("click", async (ev) => {
           ev.preventDefault();
           ev.stopPropagation();
+          const ctx = this._favCtx || {};
           const name = await promptText(
-            joined
-              ? `Neuen Ordner anlegen (${labels.join(" + ")})`
+            ctx.joined
+              ? `Neuen Ordner anlegen (${(ctx.labels || []).join(" + ")})`
               : "Neuen Ordner anlegen",
             "Ordnername"
           );
@@ -1609,7 +2270,7 @@
             newFolderBtn.disabled = false;
             return;
           }
-          for (const partner of partners) {
+          for (const partner of ctx.partners || []) {
             if (!partnerEntityAvailable(this._hass, partner.entity)) {
               results.push(`${partner.source}: übersprungen (nicht verfügbar)`);
               continue;
@@ -1635,6 +2296,47 @@
           newFolderBtn.disabled = false;
         });
       }
+
+      const titleEl = root.querySelector(".fwl-fav-title");
+      if (titleEl) {
+        if (this._config.title) {
+          titleEl.textContent = this._config.title;
+          titleEl.style.display = "";
+        } else {
+          titleEl.textContent = "";
+          titleEl.style.display = "none";
+        }
+      }
+      const summaryEl = root.querySelector(".summary");
+      if (summaryEl) summaryEl.textContent = summary;
+      const recipeBtn = root.querySelector("button.fwl-new-recipe");
+      if (recipeBtn) recipeBtn.hidden = !showChefRecipeBtn;
+      const searchInput = root.querySelector("input.fwl-fav-search");
+      if (searchInput && searchInput !== root.activeElement) {
+        // Sync value only when the user is not typing in this field.
+        if (searchInput.value !== (this._favQuery || "")) {
+          searchInput.value = this._favQuery || "";
+        }
+      }
+      const hintEl = root.querySelector(".search-hint");
+      if (hintEl) hintEl.textContent = searchHintText;
+      const joinEl = root.querySelector(".join-status");
+      if (joinEl) {
+        if (chefJoinWarn) {
+          joinEl.className = "join-status warn";
+          joinEl.textContent = chefJoinWarn;
+        } else {
+          joinEl.className = "join-status";
+          joinEl.textContent = "";
+        }
+      }
+      const bodyEl = root.querySelector(".fwl-fav-body");
+      if (bodyEl) bodyEl.innerHTML = body;
+
+      root.querySelectorAll("button.fwl-folder-head").forEach((btn) => {
+        btn.addEventListener("click", () => this._toggle(btn.getAttribute("data-id")));
+      });
+      bindOpens(root, this._hass);
 
       root.querySelectorAll("button.fwl-del-folder").forEach((btn) => {
         btn.addEventListener("click", async (ev) => {
@@ -1668,12 +2370,13 @@
           const currentFolder = btn.getAttribute("data-folder-id") || "";
           const source = btn.getAttribute("data-source") || "fwl";
           if (!recipeId) return;
+          const ctx = this._favCtx || {};
           const folderChoices =
             source === "cookidoo"
-              ? cookFolders
+              ? ctx.cookFolders || []
               : source === "chefkoch"
-                ? chefFolders
-                : folders;
+                ? ctx.chefFolders || []
+                : ctx.folders || [];
           const chosen = await pickFolder(
             `„${recipeTitle}“ verschieben`,
             folderChoices,
@@ -1713,7 +2416,7 @@
           const recipeId = btn.getAttribute("data-recipe-id") || "";
           const recipeTitle = btn.getAttribute("data-title") || "Rezept";
           const source = btn.getAttribute("data-source") || "fwl";
-          if (source === "chefkoch" && !chefCanPlan) {
+          if (source === "chefkoch" && !(this._favCtx || {}).chefCanPlan) {
             window.alert(
               "Chefkoch-Wochenplaner benötigt Chefkoch Plus (meal planner)."
             );
@@ -1775,10 +2478,12 @@
           entity:
             this._config.recipe_entity ||
             "sensor.food_with_love_rezept_des_tages",
+          cookidoo_entity: this._config.cookidoo_recipe_entity || "",
+          chefkoch_entity: this._config.chefkoch_recipe_entity || "",
           greeting_entity:
             this._config.greeting_entity ||
             "sensor.food_with_love_morgengruss",
-          title: this._config.recipe_title || "",
+          title: this._config.recipe_title || "Rezept des Tages",
         });
       }
       this._week.hass = hass;
@@ -1814,7 +2519,8 @@
     {
       type: "fwl-recipe-card",
       name: "food with love recipe",
-      description: "Recipe of the day with device-aware open action",
+      description:
+        "Compact recipe-of-the-day row (FWL + optional Cookidoo/Chefkoch)",
     },
     {
       type: "fwl-favorites-card",
