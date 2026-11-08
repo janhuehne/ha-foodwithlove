@@ -31,7 +31,9 @@ def test_week_overview_rolling_seven_days():
             "rating_count": 21,
         }
     ]
-    days = mod.build_week_overview(weekplan, language="de", today=today)
+    days = mod.build_week_overview(
+        weekplan, language="de", today=today, mode="rolling"
+    )
     assert len(days) == 7
     assert days[0]["date"] == "2026-10-24"
     assert days[0]["weekday"] == "Samstag"
@@ -53,9 +55,34 @@ def test_week_overview_rolling_seven_days():
     assert sun["meals"][0]["rating_count"] == 21
 
 
+def test_week_overview_calendar_mon_sun():
+    mod = _load_week_overview()
+    today = date(2026, 10, 24)  # Saturday
+    weekplan = [
+        {
+            "date": date(2026, 10, 20),  # Tuesday of that calendar week
+            "title": "Gnocchi alla Sorrentina",
+            "recipe_id": "rTi6KZH63rUZQRInqe7T",
+            "custom": False,
+            "app_url": "https://www.foodwithlove.de/app/?recipe=rTi6KZH63rUZQRInqe7T",
+        }
+    ]
+    days = mod.build_week_overview(
+        weekplan, language="de", today=today, mode="calendar"
+    )
+    assert len(days) == 7
+    assert days[0]["date"] == "2026-10-19"
+    assert days[0]["weekday"] == "Montag"
+    assert days[5]["is_today"] is True  # Saturday
+    assert days[6]["date"] == "2026-10-25"
+    assert days[1]["meals"][0]["title"] == "Gnocchi alla Sorrentina"
+
+
 def test_week_overview_english_labels():
     mod = _load_week_overview()
-    days = mod.build_week_overview([], language="en", today=date(2026, 11, 8))
+    days = mod.build_week_overview(
+        [], language="en", today=date(2026, 11, 8), mode="rolling"
+    )
     assert days[0]["weekday"] == "Sunday"
     assert days[0]["is_today"] is True
     assert days[6]["weekday"] == "Saturday"

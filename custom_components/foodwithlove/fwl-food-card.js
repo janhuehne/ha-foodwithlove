@@ -4,7 +4,26 @@
  * Desktop: open HA recipe viewer in an overlay (fallback: new tab).
  */
 (() => {
-  const CARD_VERSION = "0.5.31";
+  const CARD_VERSION = "0.5.33";
+  const WEEK_MODE_STORAGE_KEY = "fwl-week-mode";
+
+  function readStoredWeekMode() {
+    try {
+      const v = window.localStorage.getItem(WEEK_MODE_STORAGE_KEY);
+      if (v === "calendar" || v === "rolling") return v;
+    } catch (_err) {
+      /* private mode / denied */
+    }
+    return null;
+  }
+
+  function storeWeekMode(mode) {
+    try {
+      window.localStorage.setItem(WEEK_MODE_STORAGE_KEY, mode);
+    } catch (_err) {
+      /* ignore */
+    }
+  }
   const CARD_TAG = "fwl-food-card";
   const WEEK_TAG = "fwl-week-card";
   const RECIPE_TAG = "fwl-recipe-card";
@@ -687,6 +706,13 @@
       this._partnerByDay = this._partnerByDay || {};
       this._partnerKey = this._partnerKey || "";
       this._cookLoading = false;
+      const configured =
+        this._config.week_mode === "calendar" ||
+        this._config.week_mode === "rolling"
+          ? this._config.week_mode
+          : null;
+      this._weekMode =
+        this._weekMode || readStoredWeekMode() || configured || "rolling";
     }
 
     set hass(hass) {
@@ -703,9 +729,30 @@
       return 6;
     }
 
+    _weekModeActive() {
+      return this._weekMode === "calendar" ? "calendar" : "rolling";
+    }
+
     _fwlDays() {
       const st = this._hass && this._hass.states[this._config.entity];
-      return (st && st.attributes && st.attributes.days) || [];
+      const attrs = (st && st.attributes) || {};
+      const mode = this._weekModeActive();
+      if (mode === "calendar" && Array.isArray(attrs.days_calendar)) {
+        return attrs.days_calendar;
+      }
+      if (mode === "rolling" && Array.isArray(attrs.days_rolling)) {
+        return attrs.days_rolling;
+      }
+      return attrs.days || [];
+    }
+
+    _setWeekMode(mode) {
+      const next = mode === "calendar" ? "calendar" : "rolling";
+      if (this._weekModeActive() === next) return;
+      this._weekMode = next;
+      storeWeekMode(next);
+      this._partnerKey = "";
+      this._loadPartnerMeals().finally(() => this._render());
     }
 
     _weekMealsFromEntity(entityId) {
@@ -888,6 +935,8 @@
       if (!this._hass || !this._config) return;
       const days = this._mergedDays();
       const root = this.shadowRoot || this.attachShadow({ mode: "open" });
+      const mode = this._weekModeActive();
+      const title = this._config.title || "Wochenplan";
       let body;
       if (!days.length) {
         body = "<em>Wochenplan wird geladen…</em>";
@@ -909,6 +958,26 @@
       root.innerHTML = `
         <ha-card>
           <style>${sharedRowStyles()}
+            .fwl-week-head {
+              display: flex; align-items: center; justify-content: space-between;
+              gap: .75rem; margin: 0 0 .65rem; flex-wrap: wrap;
+            }
+            .fwl-week-head h2 {
+              margin: 0; font-size: 1.1rem; flex: 1 1 auto; min-width: 0;
+            }
+            .fwl-week-mode {
+              display: inline-flex; border: 1px solid var(--divider-color, #ddd);
+              border-radius: 999px; overflow: hidden; flex: 0 0 auto;
+            }
+            .fwl-week-mode button {
+              appearance: none; border: 0; background: transparent;
+              color: var(--secondary-text-color); font: inherit; font-size: .82rem;
+              font-weight: 600; padding: .3rem .65rem; cursor: pointer; line-height: 1.2;
+            }
+            .fwl-week-mode button.is-active {
+              background: var(--primary-color, #03a9f4);
+              color: var(--text-primary-color, #fff);
+            }
             .fwl-day {
               margin: .35rem 0 .85rem;
               padding: .35rem .55rem .55rem;
@@ -946,10 +1015,23 @@
             button.fwl-remove:disabled, button.fwl-move:disabled { opacity: .4; cursor: wait; }
           </style>
           <div style="padding:12px 16px 16px;">
-            ${this._config.title ? `<h2 style="margin:0 0 .5rem;font-size:1.1rem;">${esc(this._config.title)}</h2>` : ""}
+            <div class="fwl-week-head">
+              <h2>${esc(title)}</h2>
+              <div class="fwl-week-mode" role="group" aria-label="Wochenansicht">
+                <button type="button" data-mode="rolling" class="${mode === "rolling" ? "is-active" : ""}" title="Ab heute (7 Tage)">Ab heute</button>
+                <button type="button" data-mode="calendar" class="${mode === "calendar" ? "is-active" : ""}" title="Kalenderwoche Mo–So">Mo–So</button>
+              </div>
+            </div>
             ${body}
           </div>
         </ha-card>`;
+      root.querySelectorAll(".fwl-week-mode button").forEach((btn) => {
+        btn.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          this._setWeekMode(btn.getAttribute("data-mode") || "rolling");
+        });
+      });
       const moveOpts = { chefCanPlan: this._chefCanPlan() };
       bindOpens(root, this._hass);
       bindRemoves(root, this._hass);
@@ -2473,6 +2555,10 @@
             this._config.week_entity ||
             "sensor.food_with_love_wochenuberblick",
           title: this._config.week_title || "",
+          week_mode: this._config.week_mode || "",
+          cookidoo_entity: this._config.cookidoo_entity || "",
+          chefkoch_entity: this._config.chefkoch_entity || "",
+          cookidoo_calendar: this._config.cookidoo_calendar || "",
         });
         this._recipe.setConfig({
           entity:

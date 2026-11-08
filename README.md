@@ -15,7 +15,7 @@ Unofficial Home Assistant integration for **[food with love](https://www.foodwit
 |---|---|---|
 | Recipe of the day | no | Title, image, prep time, servings, app + large-screen viewer link |
 | Morning greeting | no | Daily greeting text |
-| Week overview | Magic Link | Rolling 7-day meal plan (today … +6) with images and smart open links |
+| Week overview | Magic Link | Meal plan with images/links; card toggle **Ab heute** (rolling 7) / **Mo–So** (calendar week) |
 | Week plan calendar | Magic Link | Create / delete planned meals |
 | Move week plan meal | Magic Link | Drag handle or calendar button on week card (add then remove; FWL / Cookidoo / Chefkoch) |
 | Remove from week plan | Magic Link | Service `foodwithlove.remove_weekplan_meal` + × on week card |

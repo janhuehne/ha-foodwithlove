@@ -177,11 +177,17 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
             return
 
         if key == SENSOR_WEEK_OVERVIEW:
-            days = build_week_overview(
-                data.get("weekplan") or [],
-                language=self.coordinator.client.language,
-                today=dt_util.now().date(),
+            weekplan = data.get("weekplan") or []
+            language = self.coordinator.client.language
+            today = dt_util.now().date()
+            days_rolling = build_week_overview(
+                weekplan, language=language, today=today, mode="rolling"
             )
+            days_calendar = build_week_overview(
+                weekplan, language=language, today=today, mode="calendar"
+            )
+            # Default ``days`` stays rolling; card can toggle to calendar.
+            days = days_rolling
             today_meals = next(
                 (d["meals"] for d in days if d.get("is_today")),
                 [],
@@ -196,13 +202,14 @@ class FwlSensor(CoordinatorEntity[FwlDataUpdateCoordinator], SensorEntity):
                 )
             else:
                 self._attr_native_value = (
-                    "Keine Rezepte"
-                    if self.coordinator.client.language == "de"
-                    else "No recipes"
+                    "Keine Rezepte" if language == "de" else "No recipes"
                 )
                 self._attr_entity_picture = None
             self._attr_extra_state_attributes = {
                 "days": days,
+                "days_rolling": days_rolling,
+                "days_calendar": days_calendar,
+                "week_mode": "rolling",
                 "meals_this_week": sum(len(d["meals"]) for d in days),
                 **auth_attrs,
             }

@@ -1,11 +1,13 @@
-"""Pure helpers for the rolling 7-day week overview (no Home Assistant imports)."""
+"""Pure helpers for the week overview (no Home Assistant imports)."""
 
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from .sanitize import is_valid_recipe_id, recipe_viewer_path
+
+WeekMode = Literal["rolling", "calendar"]
 
 _WEEKDAYS_DE = (
     "Montag",
@@ -32,8 +34,13 @@ def build_week_overview(
     *,
     language: str,
     today: date,
+    mode: WeekMode = "rolling",
 ) -> list[dict[str, Any]]:
-    """Build a rolling 7-day overview starting at ``today`` (today … today+6)."""
+    """Build a 7-day overview.
+
+    ``rolling`` — today … today+6
+    ``calendar`` — Monday … Sunday of the calendar week containing ``today``
+    """
     by_day: dict[date, list[dict[str, Any]]] = {}
     for item in weekplan:
         day = item.get("date")
@@ -64,9 +71,14 @@ def build_week_overview(
         by_day.setdefault(day, []).append(meal)
 
     weekdays = _WEEKDAYS_DE if language == "de" else _WEEKDAYS_EN
+    if mode == "calendar":
+        start = today - timedelta(days=today.weekday())
+    else:
+        start = today
+
     days: list[dict[str, Any]] = []
     for offset in range(7):
-        day = today + timedelta(days=offset)
+        day = start + timedelta(days=offset)
         meals = by_day.get(day, [])
         weekday = weekdays[day.weekday()]
         days.append(
