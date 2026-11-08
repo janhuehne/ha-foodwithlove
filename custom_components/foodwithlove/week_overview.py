@@ -1,4 +1,4 @@
-"""Pure helpers for the Mon–Sun week overview (no Home Assistant imports)."""
+"""Pure helpers for the rolling 7-day week overview (no Home Assistant imports)."""
 
 from __future__ import annotations
 
@@ -33,8 +33,7 @@ def build_week_overview(
     language: str,
     today: date,
 ) -> list[dict[str, Any]]:
-    """Build Mon–Sun overview matching the FWL app Wochenüberblick."""
-    monday = today - timedelta(days=today.weekday())
+    """Build a rolling 7-day overview starting at ``today`` (today … today+6)."""
     by_day: dict[date, list[dict[str, Any]]] = {}
     for item in weekplan:
         day = item.get("date")
@@ -67,13 +66,14 @@ def build_week_overview(
     weekdays = _WEEKDAYS_DE if language == "de" else _WEEKDAYS_EN
     days: list[dict[str, Any]] = []
     for offset in range(7):
-        day = monday + timedelta(days=offset)
+        day = today + timedelta(days=offset)
         meals = by_day.get(day, [])
+        weekday = weekdays[day.weekday()]
         days.append(
             {
                 "date": day.isoformat(),
-                "weekday": weekdays[offset],
-                "label": _day_label(day, weekdays[offset], language),
+                "weekday": weekday,
+                "label": _day_label(day, weekday, language),
                 "meals": meals,
                 "is_today": day == today,
                 "empty": not meals,
