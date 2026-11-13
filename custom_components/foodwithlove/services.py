@@ -156,7 +156,11 @@ async def _async_set_weekplan_meal(
     except FwlApiError as err:
         raise HomeAssistantError(str(err)) from err
 
-    await coordinator.async_request_refresh()
+    # Update sensors immediately; full dashboard refresh in the background.
+    coordinator.apply_weekplan_day_local(
+        key, day, enabled=enabled, custom=custom
+    )
+    coordinator.schedule_refresh()
     _LOGGER.info(
         "%s weekplan meal %s on %s (custom=%s)",
         "Added" if enabled else "Removed",

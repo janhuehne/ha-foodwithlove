@@ -86,3 +86,47 @@ def test_week_overview_english_labels():
     assert days[0]["weekday"] == "Sunday"
     assert days[0]["is_today"] is True
     assert days[6]["weekday"] == "Saturday"
+
+
+def test_patch_weekplan_list_remove_and_add():
+    mod = _load_week_overview()
+    rid = "rTi6KZH63rUZQRInqe7T"
+    weekplan = [
+        {
+            "date": date(2026, 11, 13),
+            "day_key": "20261113",
+            "recipe_id": rid,
+            "title": "Gnocchi",
+            "custom": False,
+            "image_url": "https://example.com/g.webp",
+        },
+        {
+            "date": date(2026, 11, 14),
+            "day_key": "20261114",
+            "recipe_id": "Soup",
+            "title": "Soup",
+            "custom": True,
+        },
+    ]
+    removed = mod.patch_weekplan_list(
+        weekplan, key=rid, day=date(2026, 11, 13), enabled=False, custom=False
+    )
+    assert len(removed) == 1
+    assert removed[0]["custom"] is True
+
+    moved = mod.patch_weekplan_list(
+        removed, key=rid, day=date(2026, 11, 15), enabled=True, custom=False
+    )
+    # No template left for catalog recipe → placeholder title until refresh.
+    assert any(
+        e.get("recipe_id") == rid and e.get("date") == date(2026, 11, 15)
+        for e in moved
+    )
+
+    with_template = mod.patch_weekplan_list(
+        weekplan, key=rid, day=date(2026, 11, 15), enabled=True, custom=False
+    )
+    entry = next(e for e in with_template if e.get("date") == date(2026, 11, 15))
+    assert entry["title"] == "Gnocchi"
+    assert entry["image_url"] == "https://example.com/g.webp"
+    assert len(with_template) == 3

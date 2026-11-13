@@ -502,7 +502,72 @@
     });
   }
 
-  function bindRemoves(root, hass) {
+  function setMealBusy(mealEl, busy) {
+    if (!mealEl) return;
+    mealEl.classList.toggle("is-busy", !!busy);
+    mealEl.querySelectorAll("button").forEach((b) => {
+      b.disabled = !!busy;
+    });
+  }
+
+  function syncDayEmptyState(dayEl) {
+    if (!dayEl) return;
+    const body = dayEl.querySelector(".fwl-day-body");
+    if (!body) return;
+    const meals = body.querySelectorAll(".fwl-meal");
+    const empty = body.querySelector(".fwl-day-empty");
+    if (meals.length === 0) {
+      if (!empty) {
+        const div = document.createElement("div");
+        div.className = "fwl-day-empty";
+        div.textContent = "Keine Rezepte";
+        body.appendChild(div);
+      }
+    } else if (empty) {
+      empty.remove();
+    }
+  }
+
+  function removeMealEl(mealEl) {
+    if (!mealEl) return;
+    const dayEl = mealEl.closest(".fwl-day");
+    mealEl.remove();
+    syncDayEmptyState(dayEl);
+  }
+
+  function moveMealEl(mealEl, toDate, root) {
+    if (!mealEl || !toDate || !root) return false;
+    const targetDay = root.querySelector(
+      `.fwl-day[data-date="${CSS.escape(toDate)}"]`
+    );
+    if (!targetDay) return false;
+    const fromDay = mealEl.closest(".fwl-day");
+    let body = targetDay.querySelector(".fwl-day-body");
+    if (!body) {
+      body = document.createElement("div");
+      body.className = "fwl-day-body";
+      targetDay.appendChild(body);
+    }
+    mealEl.setAttribute("data-date", toDate);
+    mealEl.querySelectorAll("[data-date]").forEach((el) => {
+      el.setAttribute("data-date", toDate);
+    });
+    const empty = body.querySelector(".fwl-day-empty");
+    if (empty) empty.remove();
+    body.appendChild(mealEl);
+    syncDayEmptyState(fromDay);
+    syncDayEmptyState(targetDay);
+    return true;
+  }
+
+  function refreshCardAfterMutation(card) {
+    if (!card) return;
+    card._moving = false;
+    card._partnerKey = "";
+    card._loadPartnerMeals().finally(() => card._render());
+  }
+
+  function bindRemoves(root, hass, card) {
     root.querySelectorAll("button.fwl-remove").forEach((btn) => {
       btn.addEventListener("click", async (ev) => {
         ev.preventDefault();
@@ -512,7 +577,10 @@
         if (!window.confirm(`„${title}“ aus dem Wochenplan entfernen?`)) {
           return;
         }
-        btn.disabled = true;
+        const mealEl = btn.closest(".fwl-meal");
+        // Optimistic: hide immediately; block hass re-renders until service returns.
+        if (card) card._moving = true;
+        removeMealEl(mealEl);
         try {
           const domain = collectionsDomain(source);
           await hass.callService(
@@ -520,20 +588,13 @@
             "remove_weekplan_meal",
             weekplanServiceData({ source, date, key, custom })
           );
+          refreshCardAfterMutation(card);
         } catch (err) {
           console.error("remove weekplan meal failed", err);
           window.alert("Konnte nicht entfernt werden.");
-          btn.disabled = false;
+          refreshCardAfterMutation(card);
         }
       });
-    });
-  }
-
-  function setMealBusy(mealEl, busy) {
-    if (!mealEl) return;
-    mealEl.classList.toggle("is-busy", !!busy);
-    mealEl.querySelectorAll("button").forEach((b) => {
-      b.disabled = !!busy;
     });
   }
 
@@ -553,8 +614,10 @@
         const day = await pickDate(`„${ident.title}“ verschieben`);
         if (!day || day === ident.fromDate) return;
         const mealEl = btn.closest(".fwl-meal");
-        setMealBusy(mealEl, true);
         if (card) card._moving = true;
+        // Optimistic: move in the DOM before the add+remove service round-trips.
+        moveMealEl(mealEl, day, root);
+        setMealBusy(mealEl, true);
         try {
           await moveWeekplanMeal(hass, {
             source: ident.source,
@@ -563,11 +626,7 @@
             key: ident.key,
             custom: ident.custom,
           });
-          if (card) {
-            card._moving = false;
-            card._partnerKey = "";
-            card._loadPartnerMeals().finally(() => card._render());
-          }
+          refreshCardAfterMutation(card);
         } catch (err) {
           console.error("move weekplan meal failed", err);
           const detail = err && (err.message || String(err));
@@ -576,8 +635,7 @@
               ? "Konnte nicht verschieben (Plus erforderlich?)."
               : `Konnte nicht verschieben.${detail ? `\n${detail}` : ""}`
           );
-          setMealBusy(mealEl, false);
-          if (card) card._moving = false;
+          refreshCardAfterMutation(card);
         }
       });
     });
@@ -667,8 +725,10 @@
           root.querySelector(
             `.fwl-meal[data-date="${CSS.escape(ident.fromDate)}"][data-key="${CSS.escape(ident.key)}"][data-source="${CSS.escape(ident.source || "fwl")}"]`
           ) || null;
-        setMealBusy(mealEl, true);
         if (card) card._moving = true;
+        // Optimistic: leave the source day immediately (add-first API is slower).
+        moveMealEl(mealEl, toDate, root);
+        setMealBusy(mealEl, true);
         try {
           await moveWeekplanMeal(hass, {
             source: ident.source || "fwl",
@@ -677,11 +737,7 @@
             key: ident.key,
             custom: !!ident.custom,
           });
-          if (card) {
-            card._moving = false;
-            card._partnerKey = "";
-            card._loadPartnerMeals().finally(() => card._render());
-          }
+          refreshCardAfterMutation(card);
         } catch (err) {
           console.error("move weekplan meal (dnd) failed", err);
           const detail = err && (err.message || String(err));
@@ -690,8 +746,7 @@
               ? "Konnte nicht verschieben (Plus erforderlich?)."
               : `Konnte nicht verschieben.${detail ? `\n${detail}` : ""}`
           );
-          setMealBusy(mealEl, false);
-          if (card) card._moving = false;
+          refreshCardAfterMutation(card);
         }
       });
     });
@@ -1034,7 +1089,7 @@
       });
       const moveOpts = { chefCanPlan: this._chefCanPlan() };
       bindOpens(root, this._hass);
-      bindRemoves(root, this._hass);
+      bindRemoves(root, this._hass, this);
       bindMoves(root, this._hass, this, moveOpts);
       bindDayDnD(root, this._hass, this, moveOpts);
     }

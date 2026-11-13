@@ -9,6 +9,95 @@ from .sanitize import is_valid_recipe_id, recipe_viewer_path
 
 WeekMode = Literal["rolling", "calendar"]
 
+
+def _coerce_weekplan_day(value: Any) -> date | None:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str) and len(value) >= 10:
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def patch_weekplan_list(
+    weekplan: list[dict[str, Any]],
+    *,
+    key: str,
+    day: date,
+    enabled: bool,
+    custom: bool,
+) -> list[dict[str, Any]]:
+    """Return a new weekplan list with ``key`` added/removed on ``day``.
+
+    Used after a successful Firestore write so sensors can update without
+    waiting for a full dashboard refetch.
+    """
+    day_key = day.strftime("%Y%m%d")
+
+    def matches(item: dict[str, Any]) -> bool:
+        item_day = _coerce_weekplan_day(item.get("date"))
+        if item_day != day:
+            return False
+        if custom:
+            return bool(item.get("custom")) and (
+                item.get("title") == key or item.get("recipe_id") == key
+            )
+        return (not item.get("custom")) and item.get("recipe_id") == key
+
+    if not enabled:
+        return [item for item in weekplan if not matches(item)]
+
+    if any(matches(item) for item in weekplan):
+        return list(weekplan)
+
+    template = next(
+        (
+            item
+            for item in weekplan
+            if bool(item.get("custom")) == custom
+            and (
+                (
+                    custom
+                    and (item.get("title") == key or item.get("recipe_id") == key)
+                )
+                or ((not custom) and item.get("recipe_id") == key)
+            )
+        ),
+        None,
+    )
+    if template:
+        entry = {**template, "date": day, "day_key": day_key}
+    elif custom:
+        entry = {
+            "date": day,
+            "day_key": day_key,
+            "recipe_id": key,
+            "title": key,
+            "custom": True,
+            "app_url": None,
+            "image_url": None,
+        }
+    else:
+        entry = {
+            "date": day,
+            "day_key": day_key,
+            "recipe_id": key,
+            "title": key,
+            "custom": False,
+        }
+
+    updated = list(weekplan)
+    updated.append(entry)
+    updated.sort(
+        key=lambda e: (
+            _coerce_weekplan_day(e.get("date")) or date.min,
+            str(e.get("title") or ""),
+        )
+    )
+    return updated
+
 _WEEKDAYS_DE = (
     "Montag",
     "Dienstag",

@@ -101,20 +101,26 @@ class FwlWeekplanCalendar(
         match = _RECIPE_ID_RE.search(description)
         try:
             if match:
+                key = match.group(1)
+                custom = False
                 await self.coordinator.client.set_weekplan_day(
-                    match.group(1), day, enabled=True, custom=False
+                    key, day, enabled=True, custom=False
                 )
             else:
-                title = (kwargs.get("summary") or "custom").strip() or "custom"
+                key = (kwargs.get("summary") or "custom").strip() or "custom"
+                custom = True
                 await self.coordinator.client.set_weekplan_day(
-                    title, day, enabled=True, custom=True
+                    key, day, enabled=True, custom=True
                 )
         except FwlAuthError as err:
             self.coordinator.entry.async_start_reauth(self.hass)
             raise HomeAssistantError("food with love authentication expired") from err
         except FwlApiError as err:
             raise HomeAssistantError(str(err)) from err
-        await self.coordinator.async_request_refresh()
+        self.coordinator.apply_weekplan_day_local(
+            key, day, enabled=True, custom=custom
+        )
+        self.coordinator.schedule_refresh()
 
     async def async_delete_event(
         self,
@@ -128,16 +134,20 @@ class FwlWeekplanCalendar(
             raise HomeAssistantError(f"Unsupported weekplan event id: {uid}")
         kind, day_key, key = parsed
         day = datetime.strptime(day_key, "%Y%m%d").date()
+        custom = kind == "c"
         try:
             await self.coordinator.client.set_weekplan_day(
-                key, day, enabled=False, custom=(kind == "c")
+                key, day, enabled=False, custom=custom
             )
         except FwlAuthError as err:
             self.coordinator.entry.async_start_reauth(self.hass)
             raise HomeAssistantError("food with love authentication expired") from err
         except FwlApiError as err:
             raise HomeAssistantError(str(err)) from err
-        await self.coordinator.async_request_refresh()
+        self.coordinator.apply_weekplan_day_local(
+            key, day, enabled=False, custom=custom
+        )
+        self.coordinator.schedule_refresh()
 
 
 def _event_uid(*, custom: bool, day_key: str, key: str) -> str:

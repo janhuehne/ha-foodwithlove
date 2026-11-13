@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -27,6 +27,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
 )
+from .week_overview import patch_weekplan_list
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,6 +65,33 @@ class FwlDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def apply_options(self) -> None:
         """Refresh poll interval after options change."""
         self.update_interval = _interval_for_entry(self.client, self.entry)
+
+    def apply_weekplan_day_local(
+        self,
+        key: str,
+        day: date,
+        *,
+        enabled: bool,
+        custom: bool,
+    ) -> None:
+        """Patch cached weekplan and notify listeners immediately.
+
+        Call after a successful Firestore write so the UI does not wait on a
+        full ``fetch_dashboard``. A background refresh still reconciles.
+        """
+        previous = self.data or {}
+        weekplan = patch_weekplan_list(
+            list(previous.get("weekplan") or []),
+            key=key,
+            day=day,
+            enabled=enabled,
+            custom=custom,
+        )
+        self.async_set_updated_data({**previous, "weekplan": weekplan})
+
+    def schedule_refresh(self) -> None:
+        """Request a coordinator refresh without blocking the caller."""
+        self.hass.async_create_task(self.async_request_refresh())
 
     async def _async_update_data(self) -> dict[str, Any]:
         days_back = int(self.entry.options.get(CONF_DAYS_BACK, DEFAULT_DAYS_BACK))
